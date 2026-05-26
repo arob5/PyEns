@@ -287,10 +287,10 @@ class EnsembleSpec:
     # Partial application
     # ------------------------------------------------------------------
 
-    def freeze(self, free: list[str]) -> BoundSpec:
+    def freeze(self, free: list[str]) -> PartialSpec:
         """Create a partially-applied spec with certain fields left open.
 
-        Returns a ``BoundSpec`` callable. Calling it with ``FieldSpec``
+        Returns a ``PartialSpec`` callable. Calling it with ``FieldSpec``
         values (or plain values, wrapped automatically in ``Fixed``) for
         the free fields returns a fully-bound ``EnsembleSpec`` ready to run.
 
@@ -302,7 +302,7 @@ class EnsembleSpec:
                 present in this spec.
 
         Returns:
-            A ``BoundSpec`` that accepts the free fields and returns an
+            A ``PartialSpec`` that accepts the free fields and returns an
             ``EnsembleSpec``.
 
         Raises:
@@ -321,7 +321,7 @@ class EnsembleSpec:
                 f"Available fields: {list(self._inputs.keys())}."
             )
         base_inputs = {k: v for k, v in self._inputs.items() if k not in free}
-        return BoundSpec(base_inputs, free_field_names=set(free))
+        return PartialSpec(base_inputs, free_field_names=set(free))
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -346,7 +346,7 @@ class EnsembleSpec:
             yield dict(zip(self._axes, combo))
 
 
-class BoundSpec:
+class PartialSpec:
     """A partially-applied ``EnsembleSpec`` with designated free fields.
 
     Obtain via ``EnsembleSpec.freeze(free=[...])``. Calling this object
@@ -401,11 +401,11 @@ class BoundSpec:
         extra = kwargs.keys() - self._free
         if missing:
             raise ValueError(
-                f"BoundSpec: missing required free field(s): {sorted(missing)}."
+                f"PartialSpec: missing required free field(s): {sorted(missing)}."
             )
         if extra:
             raise ValueError(
-                f"BoundSpec: unexpected field(s) {sorted(extra)}. "
+                f"PartialSpec: unexpected field(s) {sorted(extra)}. "
                 f"Free fields are: {sorted(self._free)}."
             )
 
@@ -417,6 +417,6 @@ class BoundSpec:
 
     def __repr__(self) -> str:
         return (
-            f"BoundSpec(free={sorted(self._free)!r}, "
+            f"PartialSpec(free={sorted(self._free)!r}, "
             f"fixed_fields={sorted(self._base.keys())!r})"
         )

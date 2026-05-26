@@ -1,4 +1,4 @@
-"""Tests for pyens.spec: EnsembleSpec and BoundSpec."""
+"""Tests for pyens.spec: EnsembleSpec and PartialSpec."""
 
 from __future__ import annotations
 
@@ -248,7 +248,7 @@ class TestFromRuns:
 
 
 # ---------------------------------------------------------------------------
-# freeze() and BoundSpec
+# freeze() and PartialSpec
 # ---------------------------------------------------------------------------
 
 class TestFreeze:
@@ -261,9 +261,9 @@ class TestFreeze:
         })
 
     def test_freeze_returns_bound_spec(self):
-        from pyens import BoundSpec
+        from pyens import PartialSpec
         bound = self.spec.freeze(free=["parameters"])
-        assert isinstance(bound, BoundSpec)
+        assert isinstance(bound, PartialSpec)
 
     def test_bound_spec_free_names(self):
         bound = self.spec.freeze(free=["parameters"])

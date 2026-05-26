@@ -46,7 +46,7 @@ spec = EnsembleSpec(inputs={
 
 ## Partial Application (`freeze`)
 
-`EnsembleSpec.freeze(free=["parameters"])` returns a `BoundSpec` — a callable that accepts only the specified free fields and returns a complete `EnsembleSpec`. This is the mechanism for constructing parameter-to-output maps usable by sampling and optimization algorithms.
+`EnsembleSpec.freeze(free=["parameters"])` returns a `PartialSpec` — a callable that accepts only the specified free fields and returns a complete `EnsembleSpec`. This is the mechanism for constructing parameter-to-output maps usable by sampling and optimization algorithms.
 
 ```python
 # Build spec with climate/IC fixed, parameters to be provided later
@@ -123,7 +123,7 @@ pyens/
 │   ├── __init__.py          # Public API exports
 │   ├── axis.py              # Axis — named ensemble dimension
 │   ├── fields.py            # Fixed, Grid field specs
-│   ├── spec.py              # EnsembleSpec, BoundSpec
+│   ├── spec.py              # EnsembleSpec, PartialSpec
 │   ├── result.py            # EnsembleResult — structured output with coordinates
 │   ├── runner.py            # EnsembleRunner — ties spec + model + backend
 │   └── backends/

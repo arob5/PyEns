@@ -554,7 +554,7 @@ spot-checking specs and for retrieving inputs for a specific run of interest.
 ## Partial application
 
 `EnsembleSpec.freeze()` marks certain fields as free variables, returning a
-**`BoundSpec`** callable. Calling it with values for the free fields produces a
+**`PartialSpec`** callable. Calling it with values for the free fields produces a
 fully-bound `EnsembleSpec`.
 
 ```python

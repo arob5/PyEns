@@ -99,12 +99,12 @@ To execute the ensemble, pass a fully-bound `EnsembleSpec` to `run()`:
 result = runner.run(spec)
 ```
 
-`run()` accepts an `EnsembleSpec` directly. If you have a `BoundSpec` (the
+`run()` accepts an `EnsembleSpec` directly. If you have a `PartialSpec` (the
 object returned by `EnsembleSpec.freeze()`), bind it to a concrete spec
 first:
 
 ```python
-runnable = param_map(parameters=theta)   # BoundSpec → EnsembleSpec
+runnable = param_map(parameters=theta)   # PartialSpec → EnsembleSpec
 result   = runner.run(runnable)
 ```
 

@@ -8,7 +8,7 @@ Specification layer:
 - :class:`Fixed` — a field with the same value for every run.
 - :class:`Grid` — a field whose value is indexed along one or more axes.
 - :class:`EnsembleSpec` — the full specification of an ensemble.
-- :class:`BoundSpec` — a partially-applied spec returned by
+- :class:`PartialSpec` — a partially-applied spec returned by
   :meth:`EnsembleSpec.freeze`.
 
 Execution layer:
@@ -33,7 +33,7 @@ from pyens.backends import Backend, LocalBackend, SequentialBackend
 from pyens.fields import FieldSpec, Fixed, Grid
 from pyens.result import EnsembleResult, RunRecord
 from pyens.runner import EnsembleRunner
-from pyens.spec import BoundSpec, EnsembleSpec
+from pyens.spec import PartialSpec, EnsembleSpec
 
 __all__ = [
     # Specification
@@ -42,7 +42,7 @@ __all__ = [
     "Fixed",
     "Grid",
     "EnsembleSpec",
-    "BoundSpec",
+    "PartialSpec",
     # Execution
     "EnsembleRunner",
     "Backend",
