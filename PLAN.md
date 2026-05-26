@@ -58,33 +58,30 @@ This is a living document. Update it as decisions are made and phases complete.
 
 **Goal:** Run an `EnsembleSpec` against a model and collect results. Testable locally.
 
-### 2.1 `EnsembleResult` (`pyens/result.py`)
-- [ ] `EnsembleResult` — stores list of `(output, coordinate)` pairs
-  - `coordinates` — list of coordinate dicts (one per run)
-  - `outputs` — list of raw model outputs
-  - `to_xarray()` — convert to `xr.Dataset` (optional; requires xarray)
-  - `__getitem__(coord_dict)` — retrieve result by coordinate
-  - `failed` — list of coordinates where the run raised an exception
-- [ ] Design decision: eager vs lazy collection (start eager)
-- [ ] Tests: basic collection, `to_xarray()`, error handling
+### 2.1 `EnsembleResult` (`pyens/result.py`) ✓
+- [x] `RunRecord(coordinate, output)` — frozen dataclass; `failed` property
+- [x] `EnsembleResult` — ordered list of `RunRecord`; failed runs stored in-place
+  - `n_runs`, `n_failed`, `outputs`, `coordinates`, `succeeded`, `failed`
+  - `__getitem__(coord_dict)` — linear scan lookup by coordinate
+  - `__iter__`, `__len__`, `__repr__`
+  - Decision: eager collection, interleaved-in-order failure storage
+  - `to_xarray()` deferred to Phase 4 (requires axis structure round-trip)
+- [x] Tests: RunRecord, counts, accessors, iteration, getitem, repr
 
-### 2.2 Backend abstraction (`pyens/backends/base.py`)
-- [ ] `Backend` abstract base class
-  - `map(fn, inputs_list) -> list[Any]` — execute fn on each element, return results
-  - `shutdown()` context manager
-- [ ] Tests: protocol check
+### 2.2 Backend abstraction (`pyens/backends/base.py`) ✓
+- [x] `Backend` ABC — single method: `map(fn, runs) -> list[Any]`
+  - Exceptions caught by backend, returned in-place (not re-raised)
+  - No shutdown/context-manager requirement (backends are stateless)
 
-### 2.3 `LocalBackend` (`pyens/backends/local.py`)
-- [ ] Wraps `concurrent.futures.ProcessPoolExecutor`
-- [ ] `n_workers` parameter
-- [ ] Configurable error handling: raise on first failure vs. collect all failures
-- [ ] Tests: correctness, exception propagation
+### 2.3 Backends ✓
+- [x] `SequentialBackend` — plain loop; zero dependencies; recommended for debugging
+- [x] `LocalBackend` — `ProcessPoolExecutor`; pickling requirement documented prominently
+- [x] Tests: correctness, order preservation, exception handling, generator input
 
-### 2.4 `EnsembleRunner` (`pyens/runner.py`)
-- [ ] `EnsembleRunner(model: Callable, backend: Backend)`
-  - `model` is any `fn(**inputs) -> output` callable
-  - `run(spec: EnsembleSpec) -> EnsembleResult`
-- [ ] Tests: toy function (e.g., sum of inputs), LocalBackend, error propagation
+### 2.4 `EnsembleRunner` (`pyens/runner.py`) ✓
+- [x] `EnsembleRunner(model, backend)` — accepts bare `EnsembleSpec` only
+- [x] `run(spec) -> EnsembleResult`
+- [x] Tests: outputs, coordinates, failure handling, zip semantics, all-inputs-forwarded
 
 ---
 

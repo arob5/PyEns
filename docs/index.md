@@ -15,6 +15,7 @@ This documentation covers the core concepts. If you are new to pyens, start with
 :caption: User Guide
 
 user_guide/data_model
+user_guide/running
 ```
 
 ```{toctree}
