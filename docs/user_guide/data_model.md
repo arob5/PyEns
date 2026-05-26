@@ -20,11 +20,9 @@ Here `parameters`, `forcing`, and `ic` are the input names; `theta`,
 `climate_data`, and `initial_state` are their values for this particular run.
 
 :::{note}
-*Initial conditions* (IC) is a concept from dynamical systems: many scientific
-models — climate models, ecosystem models, epidemiological models, and others —
-simulate how a system evolves through time. The state of the system at the start
-of the simulation is the initial condition. It must be specified alongside any
-other model inputs.
+Throughout this tutorial, we use toy examples motivated by ecological and climate
+modeling applications. The dynamical models used in these fields often have various
+inputs: parameters, initial conditions (IC), and forcing data.
 :::
 
 An **ensemble** is simply a collection of such function calls, each with the same
@@ -190,13 +188,26 @@ ax1 is ax2   # False — these are two independent dimensions
 ```
 
 This is intentional. It means you can have two dimensions named "site" without
-them interfering. It also means that to make two fields co-vary along the same
+them interfering (though this is not recommended). It also means that to make
+two fields co-vary along the same
 dimension, you must pass the *same* `Axis` object to both. The design makes
 sharing explicit and accidental alignment impossible.
 
 ---
 
 ## Fields
+
+A **field** describes one keyword argument to the model function — a single named
+slot in the model's interface such as `parameters` or `forcing`. Every argument in
+an `EnsembleSpec` is represented as a field. A field's role in the ensemble is
+described by its *field spec* — an object that says whether and how that argument
+varies across runs. PyEns provides two field spec types:
+
+- **`Fixed`** — the value is the same for every run. A fixed field contributes no
+  axis and adds no dimension to the ensemble.
+- **`Grid`** — the value depends on one or more axes. A grid field defines a
+  labeled lookup table: given the coordinates of a run, it returns the
+  appropriate value.
 
 ### Fixed
 
@@ -282,6 +293,54 @@ A multi-axis Grid is appropriate when an input is *jointly determined* by severa
 factors. An initial condition that depends on both the site and the ensemble member
 is a natural example: you cannot describe it as a function of site alone or member
 alone.
+
+When axes have explicit labels, you can use mappings at any level of the nesting,
+independently. The other three combinations for a two-axis grid are:
+
+**Dict of lists** — outer (site) axis labeled, inner (member) axis positional:
+
+```python
+ic_field = Grid(
+    {
+        "wetland_C":   [ic_wC_m0, ic_wC_m1, ic_wC_m2, ic_wC_m3],  # order of
+        "forest_A":    [ic_fA_m0, ic_fA_m1, ic_fA_m2, ic_fA_m3],  # keys does
+        "grassland_B": [ic_gB_m0, ic_gB_m1, ic_gB_m2, ic_gB_m3],  # not matter
+    },
+    along=[sites, members],
+)
+```
+
+**Dict of dicts** — both axes labeled:
+
+```python
+named_members = Axis("member", labels=["low", "mid", "high", "high2"])
+
+ic_field = Grid(
+    {
+        "forest_A":    {"low": ic_fA_low, "mid": ic_fA_mid, "high": ic_fA_high, "high2": ic_fA_h2},
+        "grassland_B": {"low": ic_gB_low, "mid": ic_gB_mid, "high": ic_gB_high, "high2": ic_gB_h2},
+        "wetland_C":   {"low": ic_wC_low, "mid": ic_wC_mid, "high": ic_wC_high, "high2": ic_wC_h2},
+    },
+    along=[sites, named_members],
+)
+```
+
+**List of dicts** — outer axis positional, inner axis labeled:
+
+```python
+ic_field = Grid(
+    [
+        {"low": ic_fA_low, "mid": ic_fA_mid, "high": ic_fA_high, "high2": ic_fA_h2},   # forest_A
+        {"low": ic_gB_low, "mid": ic_gB_mid, "high": ic_gB_high, "high2": ic_gB_h2},   # grassland_B
+        {"low": ic_wC_low, "mid": ic_wC_mid, "high": ic_wC_high, "high2": ic_wC_h2},   # wetland_C
+    ],
+    along=[sites, named_members],
+)
+```
+
+All four forms produce identical results. Use whichever makes the assignment most
+readable. The dict form at any level is only available when the corresponding axis
+was created with `labels=[...]` (not `size=N`).
 
 ---
 

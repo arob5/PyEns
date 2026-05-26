@@ -76,34 +76,39 @@ class Grid(FieldSpec):
     The value for a given run is looked up by indexing into ``values`` using
     the integer index of each axis at that run's coordinate.
 
-    ``values`` may be provided as either a **sequence** or a **mapping**:
+    ``values`` may be provided as a **sequence**, a **mapping**, or any
+    **nesting of sequences and mappings** — one nesting level per axis,
+    outermost first:
 
-    - **Sequence** (list or any indexable): values are assigned positionally,
-      in the same order as the axis labels. The outermost level must have length
-      equal to the first axis size; for multi-axis grids each subsequent level
-      indexes the next axis.
-    - **Mapping** (dict or any ``Mapping``): values are assigned by label name.
-      Only supported for single-axis grids whose axis was created with explicit
-      labels (``labels=[...]``). Keys must match the axis labels exactly. Order
-      does not matter.
+    - **Sequence** at a level: values are assigned positionally, in the same
+      order as the axis labels. The length must equal the axis size at that
+      level.
+    - **Mapping** at a level: values are assigned by label name. The axis at
+      that level must have been created with explicit labels (``labels=[...]``).
+      Keys must match the axis labels exactly. Order does not matter.
+
+    For a two-axis grid this gives four combinations:
+
+    - **List of lists** — both axes positional.
+    - **Dict of lists** — outer axis labeled, inner axis positional.
+    - **List of dicts** — outer axis positional, inner axis labeled.
+    - **Dict of dicts** — both axes labeled.
 
     Two ``Grid`` fields that share the same ``Axis`` **instance** are aligned
     (zip semantics). Two ``Grid`` fields on **different** ``Axis`` instances
     contribute independent dimensions and are crossed as a Cartesian product.
 
     Args:
-        values: Sequence, nested sequence, or label-keyed mapping of values.
-            The shape must match the sizes of the provided axes, outermost
-            axis first. A mapping is only supported for single-axis grids
-            with explicit labels.
+        values: A sequence or mapping at each nesting level, one level per
+            axis. The outermost level corresponds to the first axis.
         along: A single ``Axis``, or a list of ``Axis`` objects defining the
             indexing dimensions. At least one axis is required.
 
     Raises:
-        ValueError: If ``along`` is empty; if the top-level length of a
-            sequence does not match the first axis size; if a mapping is
-            supplied for a multi-axis grid or an integer-labeled axis; or
-            if a mapping's keys do not exactly match the axis labels.
+        ValueError: If ``along`` is empty; if the length of a sequence at any
+            level does not match the corresponding axis size; if a mapping is
+            used at a level whose axis has no explicit labels; or if a
+            mapping's keys do not exactly match the axis labels.
 
     Examples:
         Positional sequence::
@@ -120,10 +125,13 @@ class Grid(FieldSpec):
             >>> g.value_at({sites: 0})
             'cold'
 
-        Multi-axis nested sequence::
+        Multi-axis grid — dict of lists (outer axis labeled, inner positional)::
 
             >>> members = Axis("member", size=2)
-            >>> g2 = Grid([["a", "b"], ["c", "d"], ["e", "f"]], along=[sites, members])
+            >>> g2 = Grid(
+            ...     {"s2": ["c", "d"], "s1": ["a", "b"], "s3": ["e", "f"]},
+            ...     along=[sites, members],
+            ... )
             >>> g2.value_at({sites: 2, members: 0})
             'e'
     """
@@ -142,62 +150,60 @@ class Grid(FieldSpec):
         if len(self._axes) == 0:
             raise ValueError("Grid: 'along' must specify at least one Axis.")
 
-        if isinstance(values, Mapping):
-            self._values: Any = self._resolve_mapping(values)
-        else:
-            self._values = values
+        self._values: Any = self._resolve_at_level(values, 0)
 
-        self._validate_top_level_shape()
+    def _resolve_at_level(self, values: Any, axis_index: int) -> list:
+        """Recursively resolve *values* at *axis_index* into a plain list.
 
-    def _resolve_mapping(self, mapping: Mapping) -> list:
-        """Convert a label-keyed mapping to a positionally-ordered list.
-
-        Only valid for single-axis grids with explicit labels.
+        Each nesting level may independently be a sequence (positional) or a
+        mapping (label-keyed). The resolved list is always positionally ordered
+        to match axis label order so that ``value_at`` can index with a plain
+        integer at every level.
         """
-        if len(self._axes) != 1:
-            raise ValueError(
-                "Grid: a mapping can only be used for single-axis grids. "
-                "For multi-axis grids, provide a nested sequence."
-            )
-        axis = self._axes[0]
-        if axis._labels is None:
-            raise ValueError(
-                f"Grid: a mapping requires an axis with explicit labels, but "
-                f"axis '{axis.name}' was created with size={axis.size} "
-                f"(integer-indexed only). Re-create the axis with labels=[...] "
-                f"to use label-keyed assignment."
-            )
-        provided = set(mapping.keys())
-        expected = set(axis.labels)
-        missing = expected - provided
-        extra = provided - expected
-        if missing:
-            raise ValueError(
-                f"Grid: mapping is missing values for labels: "
-                f"{sorted(str(k) for k in missing)}."
-            )
-        if extra:
-            raise ValueError(
-                f"Grid: mapping contains unexpected labels: "
-                f"{sorted(str(k) for k in extra)}."
-            )
-        return [mapping[label] for label in axis.labels]
+        axis = self._axes[axis_index]
+        is_last = axis_index == len(self._axes) - 1
 
-    def _validate_top_level_shape(self) -> None:
-        """Validate that the outermost length of values matches the first axis."""
-        first_axis = self._axes[0]
-        try:
-            n = len(self._values)
-        except TypeError:
-            raise ValueError(
-                f"Grid: values must support len() to be indexed along axis "
-                f"'{first_axis.name}' (expected a sequence of length {first_axis.size})."
-            )
-        if n != first_axis.size:
-            raise ValueError(
-                f"Grid: axis '{first_axis.name}' has size {first_axis.size} "
-                f"but values has length {n}."
-            )
+        if isinstance(values, Mapping):
+            if axis._labels is None:
+                raise ValueError(
+                    f"Grid: a mapping at axis '{axis.name}' requires explicit "
+                    f"labels, but this axis was created with size={axis.size} "
+                    f"(integer-indexed only). Re-create the axis with "
+                    f"labels=[...] to use label-keyed assignment."
+                )
+            provided = set(values.keys())
+            expected = set(axis.labels)
+            missing = expected - provided
+            extra = provided - expected
+            if missing:
+                raise ValueError(
+                    f"Grid: mapping for axis '{axis.name}' is missing values "
+                    f"for labels: {sorted(str(k) for k in missing)}."
+                )
+            if extra:
+                raise ValueError(
+                    f"Grid: mapping for axis '{axis.name}' contains unexpected "
+                    f"labels: {sorted(str(k) for k in extra)}."
+                )
+            ordered = [values[label] for label in axis.labels]
+        else:
+            try:
+                n = len(values)
+            except TypeError:
+                raise ValueError(
+                    f"Grid: values at axis '{axis.name}' must support len() "
+                    f"(expected a sequence of length {axis.size})."
+                )
+            if n != axis.size:
+                raise ValueError(
+                    f"Grid: axis '{axis.name}' has size {axis.size} but "
+                    f"values has length {n}."
+                )
+            ordered = list(values)
+
+        if is_last:
+            return ordered
+        return [self._resolve_at_level(item, axis_index + 1) for item in ordered]
 
     @property
     def axes(self) -> tuple[Axis, ...]:
