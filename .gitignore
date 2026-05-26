@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+
+# uv / venv
+.venv/
+.python-version
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# editors
+.DS_Store

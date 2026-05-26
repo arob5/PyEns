@@ -1,0 +1,25 @@
+[project]
+name = "pyens"
+version = "0.1.0"
+description = "Structured ensemble runner for scientific models"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+parsl = ["parsl>=2024.1"]
+xarray = ["xarray>=2024.1", "numpy>=1.26"]
+all = ["pyens[parsl,xarray]"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
