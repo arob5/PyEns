@@ -16,5 +16,8 @@ build/
 .coverage
 htmlcov/
 
+# Sphinx
+docs/_build/
+
 # editors
 .DS_Store
