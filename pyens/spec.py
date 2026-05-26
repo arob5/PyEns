@@ -207,6 +207,83 @@ class EnsembleSpec:
             yield run_inputs, coordinate
 
     # ------------------------------------------------------------------
+    # Point selection
+    # ------------------------------------------------------------------
+
+    def sel(self, **coords: Any) -> RunInputs:
+        """Return the inputs for a specific run, selected by coordinate label.
+
+        Looks up the concrete input values for the single run identified by
+        the given coordinate. All axes in the spec must be specified.
+
+        Args:
+            **coords: One keyword argument per axis, mapping axis name to
+                the desired label value.
+
+        Returns:
+            A ``RunInputs`` dict mapping each field name to its concrete value
+            at the given coordinate. Equivalent to the ``inputs`` dict that
+            ``iter_runs()`` would yield for this run.
+
+        Raises:
+            ValueError: If the spec contains two axes with the same name
+                (use ``iter_runs()`` and filter manually in that case); if
+                an unknown axis name is provided; if a provided label is not
+                found on its axis; or if not all axes are specified.
+
+        Examples:
+            >>> sites   = Axis("site", labels=["A", "B"])
+            >>> members = Axis("member", size=3)
+            >>> spec = EnsembleSpec(inputs={
+            ...     "x": Grid(["a", "b"], along=sites),
+            ...     "y": Grid([10, 20, 30], along=members),
+            ... })
+            >>> spec.sel(site="B", member=1)
+            {'x': 'b', 'y': 20}
+        """
+        # Build name → axis mapping, detecting duplicate names.
+        axis_by_name: dict[str, Axis] = {}
+        for ax in self._axes:
+            if ax.name in axis_by_name:
+                raise ValueError(
+                    f"EnsembleSpec.sel(): ambiguous — the spec contains two axes "
+                    f"named '{ax.name}'. Use iter_runs() and filter by coordinate "
+                    f"manually when axis names are not unique."
+                )
+            axis_by_name[ax.name] = ax
+
+        unknown = set(coords.keys()) - set(axis_by_name.keys())
+        missing = set(axis_by_name.keys()) - set(coords.keys())
+        if unknown:
+            raise ValueError(
+                f"sel(): unknown axis name(s): {sorted(unknown)}. "
+                f"Available axes: {sorted(axis_by_name.keys())}."
+            )
+        if missing:
+            raise ValueError(
+                f"sel(): all axes must be specified. "
+                f"Missing: {sorted(missing)}."
+            )
+
+        idx_coords: dict[Axis, int] = {}
+        for name, label in coords.items():
+            ax = axis_by_name[name]
+            labels_list = list(ax.labels)
+            try:
+                idx = labels_list.index(label)
+            except ValueError:
+                raise ValueError(
+                    f"sel(): label {label!r} not found in axis '{name}'. "
+                    f"Available labels: {labels_list}."
+                )
+            idx_coords[ax] = idx
+
+        return {
+            name: field.value_at(idx_coords)
+            for name, field in self._inputs.items()
+        }
+
+    # ------------------------------------------------------------------
     # Partial application
     # ------------------------------------------------------------------
 

@@ -16,3 +16,10 @@ This documentation covers the core concepts. If you are new to pyens, start with
 
 user_guide/data_model
 ```
+
+```{toctree}
+:maxdepth: 1
+:caption: Project
+
+conventions
+```

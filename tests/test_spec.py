@@ -309,3 +309,63 @@ class TestFreeze:
         for inputs, _ in collect(runnable):
             assert inputs["a"] == "new_a"
             assert inputs["b"] == "new_b"
+
+
+# ---------------------------------------------------------------------------
+# sel()
+# ---------------------------------------------------------------------------
+
+class TestSel:
+    def setup_method(self):
+        self.sites   = Axis("site",   labels=["A", "B", "C"])
+        self.members = Axis("member", size=3)
+        self.spec = EnsembleSpec(inputs={
+            "climate": Grid(["c_A", "c_B", "c_C"], along=self.sites),
+            "ic":      Grid([10, 20, 30],           along=self.members),
+            "params":  Fixed("base"),
+        })
+
+    def test_returns_correct_inputs(self):
+        result = self.spec.sel(site="B", member=2)
+        assert result["climate"] == "c_B"
+        assert result["ic"] == 30
+        assert result["params"] == "base"
+
+    def test_first_coordinate(self):
+        result = self.spec.sel(site="A", member=0)
+        assert result["climate"] == "c_A"
+        assert result["ic"] == 10
+
+    def test_fixed_field_included(self):
+        result = self.spec.sel(site="A", member=0)
+        assert "params" in result
+        assert result["params"] == "base"
+
+    def test_unknown_axis_raises(self):
+        with pytest.raises(ValueError, match="unknown axis"):
+            self.spec.sel(site="A", member=0, unknown="x")
+
+    def test_missing_axis_raises(self):
+        with pytest.raises(ValueError, match="Missing"):
+            self.spec.sel(site="A")  # member not specified
+
+    def test_bad_label_raises(self):
+        with pytest.raises(ValueError, match="not found in axis"):
+            self.spec.sel(site="Z", member=0)
+
+    def test_integer_label_lookup(self):
+        """Integer-labeled axes are selected with integer label values."""
+        result = self.spec.sel(site="A", member=1)
+        assert result["ic"] == 20
+
+    def test_no_axes_spec_sel_empty(self):
+        """A spec with only Fixed fields has no axes; sel() with no args works."""
+        spec = EnsembleSpec(inputs={"x": Fixed(99)})
+        result = spec.sel()
+        assert result == {"x": 99}
+
+    def test_matches_iter_runs(self):
+        """sel() should return the same inputs as the matching iter_runs() pair."""
+        for inputs, coord in self.spec.iter_runs():
+            selected = self.spec.sel(**coord)
+            assert selected == inputs

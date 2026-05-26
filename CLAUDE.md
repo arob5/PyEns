@@ -93,6 +93,11 @@ The same `EnsembleSpec` and model work unchanged across backends.
 
 ## Documentation Standards
 
+> **Before writing or editing any documentation, check
+> [`docs/conventions.md`](docs/conventions.md)** for naming rules, terminology,
+> and tone guidelines. The most important rule: use **PyEns** in prose and headings,
+> `pyens` in code.
+
 **Documentation quality is a first-class requirement in this project.** pyens is a research tool used by people who may not be professional software engineers. Clear, complete documentation is part of correctness — an undocumented interface is an incomplete interface.
 
 ### Rules

@@ -85,3 +85,54 @@ class TestGridRequiresAxes:
     def test_empty_along_list(self):
         with pytest.raises(ValueError, match="at least one Axis"):
             Grid(["a", "b"], along=[])
+
+
+class TestGridDictValues:
+    """Tests for label-keyed dict construction of Grid."""
+
+    def setup_method(self):
+        self.sites = Axis("site", labels=["A", "B", "C"])
+
+    def test_dict_produces_correct_values(self):
+        g = Grid({"A": 10, "B": 20, "C": 30}, along=self.sites)
+        assert g.value_at({self.sites: 0}) == 10
+        assert g.value_at({self.sites: 1}) == 20
+        assert g.value_at({self.sites: 2}) == 30
+
+    def test_dict_order_independent(self):
+        """Keys in any order should yield values ordered by axis labels."""
+        g = Grid({"C": "third", "A": "first", "B": "second"}, along=self.sites)
+        assert g.value_at({self.sites: 0}) == "first"
+        assert g.value_at({self.sites: 1}) == "second"
+        assert g.value_at({self.sites: 2}) == "third"
+
+    def test_dict_equivalent_to_positional(self):
+        """Dict and positional construction produce identical grids."""
+        g_pos  = Grid(["x", "y", "z"], along=self.sites)
+        g_dict = Grid({"A": "x", "B": "y", "C": "z"}, along=self.sites)
+        for i in range(3):
+            assert g_pos.value_at({self.sites: i}) == g_dict.value_at({self.sites: i})
+
+    def test_dict_missing_label_raises(self):
+        with pytest.raises(ValueError, match="missing values for labels"):
+            Grid({"A": 1, "B": 2}, along=self.sites)  # C is missing
+
+    def test_dict_extra_label_raises(self):
+        with pytest.raises(ValueError, match="unexpected labels"):
+            Grid({"A": 1, "B": 2, "C": 3, "D": 4}, along=self.sites)
+
+    def test_dict_integer_labeled_axis_raises(self):
+        """Dict form requires explicit labels, not integer-only axis."""
+        int_axis = Axis("member", size=3)
+        with pytest.raises(ValueError, match="integer-indexed only"):
+            Grid({0: "a", 1: "b", 2: "c"}, along=int_axis)
+
+    def test_dict_multi_axis_raises(self):
+        """Dict form is not supported for multi-axis grids."""
+        other = Axis("other", labels=["x", "y"])
+        with pytest.raises(ValueError, match="single-axis"):
+            Grid({"A": 1, "B": 2, "C": 3}, along=[self.sites, other])
+
+    def test_dict_axes_property(self):
+        g = Grid({"A": 1, "B": 2, "C": 3}, along=self.sites)
+        assert g.axes == (self.sites,)
