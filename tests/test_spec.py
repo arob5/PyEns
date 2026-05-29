@@ -71,6 +71,27 @@ class TestRunCounts:
         })
         assert spec.n_runs == 3
 
+    def test_structurally_equal_axes_zip_semantics(self):
+        """Two distinct but structurally equal Axis objects → zip (not product)."""
+        ax1 = Axis("site", size=3)
+        ax2 = Axis("site", size=3)
+        assert ax1 is not ax2
+        spec = EnsembleSpec(inputs={
+            "climate": Grid(["c1", "c2", "c3"], along=ax1),
+            "ic":      Grid(["i1", "i2", "i3"], along=ax2),
+        })
+        assert spec.n_runs == 3
+
+    def test_conflicting_axis_names_raises(self):
+        """Same axis name but different structure → ValueError."""
+        ax1 = Axis("site", size=3)
+        ax2 = Axis("site", size=4)
+        with pytest.raises(ValueError, match="two axes named 'site'"):
+            EnsembleSpec(inputs={
+                "climate": Grid(["c1", "c2", "c3"], along=ax1),
+                "ic":      Grid(["i1", "i2", "i3", "i4"], along=ax2),
+            })
+
     def test_three_independent_axes(self):
         ax1 = Axis("p", size=2)
         ax2 = Axis("s", size=3)

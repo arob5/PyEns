@@ -16,6 +16,7 @@ This documentation covers the core concepts. If you are new to pyens, start with
 
 user_guide/data_model
 user_guide/running
+user_guide/reproducibility
 ```
 
 ```{toctree}

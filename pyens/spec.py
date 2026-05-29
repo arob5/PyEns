@@ -328,13 +328,27 @@ class EnsembleSpec:
     # ------------------------------------------------------------------
 
     def _collect_axes(self) -> tuple[Axis, ...]:
-        """Collect unique Axis instances across all fields, insertion-ordered."""
-        seen: dict[int, Axis] = {}
+        """Collect unique Axis objects across all fields, insertion-ordered.
+
+        Two structurally-equal axes (same name, size, and labels) are treated
+        as one dimension. Two axes sharing the same name but with different
+        structure are an error — axis names must be unique within a spec.
+        """
+        seen: dict[Axis, None] = {}
+        name_to_axis: dict[str, Axis] = {}
         for field in self._inputs.values():
             for ax in field.axes:
-                if id(ax) not in seen:
-                    seen[id(ax)] = ax
-        return tuple(seen.values())
+                if ax.name in name_to_axis and name_to_axis[ax.name] != ax:
+                    existing = name_to_axis[ax.name]
+                    raise ValueError(
+                        f"EnsembleSpec: two axes named '{ax.name}' have different "
+                        f"structures ({existing!r} vs {ax!r}). Axis names must be "
+                        f"unique within a spec; same-named axes must be structurally "
+                        f"identical (same size and labels)."
+                    )
+                name_to_axis[ax.name] = ax
+                seen[ax] = None
+        return tuple(seen.keys())
 
     def _iter_index_coords(self) -> Iterator[dict[Axis, int]]:
         """Iterate over all run coordinates as ``{Axis: index}`` dicts."""

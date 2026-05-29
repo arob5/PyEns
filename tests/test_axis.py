@@ -62,24 +62,61 @@ class TestAxisLabelAt:
             ax.label_at(-1)
 
 
-class TestAxisIdentity:
+class TestAxisEquality:
     def test_same_instance_is_equal(self):
         ax = Axis("site", size=3)
-        assert ax is ax
+        assert ax == ax
 
-    def test_different_instances_not_equal(self):
-        """Two Axis objects with the same name are NOT the same dimension."""
+    def test_structurally_equal_axes_are_equal(self):
+        """Two Axis objects with the same name and structure are equal."""
         ax1 = Axis("site", size=3)
         ax2 = Axis("site", size=3)
-        assert ax1 is not ax2
+        assert ax1 is not ax2   # distinct objects
+        assert ax1 == ax2        # but structurally equal
+
+    def test_structurally_equal_axes_have_same_hash(self):
+        ax1 = Axis("site", labels=["A", "B"])
+        ax2 = Axis("site", labels=["A", "B"])
+        assert hash(ax1) == hash(ax2)
+
+    def test_different_name_not_equal(self):
+        ax1 = Axis("site", size=3)
+        ax2 = Axis("region", size=3)
         assert ax1 != ax2
 
-    def test_usable_as_dict_key(self):
+    def test_different_size_not_equal(self):
+        ax1 = Axis("site", size=3)
+        ax2 = Axis("site", size=4)
+        assert ax1 != ax2
+
+    def test_different_labels_not_equal(self):
+        ax1 = Axis("site", labels=["A", "B"])
+        ax2 = Axis("site", labels=["A", "C"])
+        assert ax1 != ax2
+
+    def test_labeled_vs_integer_not_equal(self):
+        """size=N and labels=[0,...,N-1] are not equal: different internal form."""
+        ax1 = Axis("site", size=2)
+        ax2 = Axis("site", labels=["A", "B"])
+        assert ax1 != ax2
+
+    def test_structurally_equal_as_dict_key(self):
+        """Equal axes map to the same dict slot."""
         ax1 = Axis("site", size=2)
         ax2 = Axis("site", size=2)
-        d = {ax1: "first", ax2: "second"}
-        assert d[ax1] == "first"
-        assert d[ax2] == "second"
+        d = {ax1: "value"}
+        assert d[ax2] == "value"
+
+    def test_unequal_axes_are_distinct_dict_keys(self):
+        ax1 = Axis("site", size=2)
+        ax2 = Axis("region", size=2)
+        d = {ax1: "site_val", ax2: "region_val"}
+        assert d[ax1] == "site_val"
+        assert d[ax2] == "region_val"
+
+    def test_non_axis_comparison_returns_not_implemented(self):
+        ax = Axis("site", size=2)
+        assert ax.__eq__("not an axis") is NotImplemented
 
 
 class TestAxisRepr:
