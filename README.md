@@ -2,8 +2,7 @@
 
 **PyEns** is a Python library for specifying and executing structured ensemble
 model runs. It is designed for scientific workflows where the same model must
-be evaluated at many combinations of inputs — different parameters, different
-forcing data, different sites — and where keeping track of which output came
+be evaluated at many combinations of inputs and where keeping track of which output came
 from which input is important.
 
 PyEns fills a specific gap: a clean, programmatic Python API for describing
