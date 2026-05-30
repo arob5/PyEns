@@ -143,5 +143,4 @@ Full documentation is at **https://arob5.github.io/PyEns/**.
 - **Backend agnostic.** The same spec runs locally or on an HPC cluster
   without modification.
 - **Composable.** `EnsembleSpec.freeze()` turns a spec into a callable that
-  accepts free fields — making it straightforward to wrap an ensemble as a
-  parameter-to-output map for samplers and optimizers.
+  accepts free fields.
