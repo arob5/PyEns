@@ -175,23 +175,38 @@ The axis name appears in coordinates (the labels attached to each run's output)
 and in diagnostic output from `describe()`. Choose names that are meaningful in
 the context of your problem.
 
-### Identity semantics
+### Equality semantics
 
-Two axes are the *same dimension* if and only if they are the same Python object.
-Name equality is not sufficient:
+Two axes are the *same dimension* if they have the same **name**, **size**, and
+**labels**. Creating two `Axis` objects with identical arguments is equivalent
+to sharing a single object:
 
 ```python
 ax1 = Axis("site", labels=["A", "B", "C"])
-ax2 = Axis("site", labels=["A", "B", "C"])  # identical definition, different object
+ax2 = Axis("site", labels=["A", "B", "C"])  # identical definition
 
-ax1 is ax2   # False — these are two independent dimensions
+ax1 == ax2   # True — structurally equal, treated as the same dimension
+ax1 is ax2   # False — still distinct Python objects
 ```
 
-This is intentional. It means you can have two dimensions named "site" without
-them interfering (though this is not recommended). It also means that to make
-two fields co-vary along the same
-dimension, you must pass the *same* `Axis` object to both. The design makes
-sharing explicit and accidental alignment impossible.
+This means you can define axes independently — in separate modules, or
+at different points in a notebook — and they will be treated as the same
+dimension as long as their names and structure match.
+
+Axes with the same name but different structures are an error: an
+`EnsembleSpec` will raise `ValueError` if two fields reference axes with the
+same name but conflicting sizes or labels, since the resulting coordinate space
+would be ambiguous.
+
+```python
+ax1 = Axis("site", size=3)
+ax2 = Axis("site", size=4)   # same name, different size
+
+EnsembleSpec(inputs={
+    "climate": Grid([...], along=ax1),
+    "ic":      Grid([...], along=ax2),   # ValueError: conflicting "site" axes
+})
+```
 
 ---
 
@@ -389,12 +404,12 @@ for inputs, coord in spec.iter_runs():
 How the spec produces run combinations depends entirely on which axes the fields
 share. The rule:
 
-:::{admonition} The axis identity rule
+:::{admonition} The axis equality rule
 :class: important
 
-Fields on the **same `Axis` instance** co-vary along that dimension (zip
-semantics). Fields on **different `Axis` instances** are varied independently
-(Cartesian product).
+Fields on **equal `Axis` objects** (same name, size, and labels) co-vary along
+that dimension (zip semantics). Fields on **unequal `Axis` objects** are varied
+independently (Cartesian product).
 :::
 
 Working through the cases concretely:
@@ -621,12 +636,11 @@ coordinate systems.
 
 **Key differences from xarray:**
 
-*Alignment by object identity, not name.* In xarray, two DataArrays are aligned
-along a dimension if they have the same dimension *name* (string). In PyEns,
-alignment requires the same `Axis` *object*. This is a deliberate trade-off: name-
-based alignment is more ergonomic but silently aligns dimensions that happen to share
-a name. Identity-based alignment requires passing the same object around, but makes
-sharing completely explicit and unambiguous.
+*Alignment by structural equality, not name alone.* In xarray, two DataArrays are
+aligned along a dimension if they share the same dimension *name* (string match).
+In PyEns, two axes are the same dimension when they share the same name *and*
+the same size and labels. This prevents silent misalignment: two axes named
+"site" with different label sets are an error rather than a silent merge.
 
 *Arbitrary objects, not numeric arrays.* xarray stores numeric data and supports
 arithmetic, broadcasting ufuncs, and statistical operations. PyEns stores arbitrary

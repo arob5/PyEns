@@ -8,10 +8,14 @@ from typing import Any, Hashable, Sequence
 class Axis:
     """A named dimension along which ensemble inputs vary.
 
-    Two ``Grid`` fields that reference the **same** ``Axis`` instance are
-    *aligned* (zip semantics — they co-vary along that dimension). Two fields
-    referencing **different** ``Axis`` instances are *crossed* (Cartesian
-    product). Identity is therefore object identity, not name equality.
+    Two ``Grid`` fields that reference **equal** ``Axis`` objects are *aligned*
+    (zip semantics — they co-vary along that dimension). Two fields referencing
+    **unequal** ``Axis`` objects are *crossed* (Cartesian product).
+
+    Equality is structural: two ``Axis`` objects are equal when they share the
+    same ``name``, the same ``size``, and the same ``labels`` (if provided).
+    Creating two ``Axis`` objects with identical arguments is therefore
+    equivalent to sharing a single object — both forms produce zip semantics.
 
     Args:
         name: Human-readable identifier for this dimension. Used in result
@@ -96,6 +100,14 @@ class Axis:
         if self._labels is not None:
             return self._labels[index]
         return index
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Axis):
+            return NotImplemented
+        return self.name == other.name and self._labels == other._labels and self.size == other.size
+
+    def __hash__(self) -> int:
+        return hash((self.name, self._labels, self.size))
 
     def __len__(self) -> int:
         return self.size
