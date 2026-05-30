@@ -10,10 +10,10 @@ and offers guidance on building a reproducible workflow around PyEns.
 
 ## Writing and reading a spec file
 
-Two functions cover the common case:
+Call `dump()` on any spec to write it to disk, and `EnsembleSpec.load()` to
+read it back:
 
 ```python
-from pyens import dump_spec, load_spec
 from pyens import Axis, EnsembleSpec, Fixed, Grid
 
 sites = Axis("site", labels=["harvard_forest", "niwot_ridge"])
@@ -24,10 +24,10 @@ spec = EnsembleSpec(inputs={
 })
 
 # Write to disk
-dump_spec(spec, "runs/ensemble_spec.json")
+spec.dump("runs/ensemble_spec.json")
 
 # Read back — returns a fully functional EnsembleSpec
-recovered = load_spec("runs/ensemble_spec.json")
+recovered = EnsembleSpec.load("runs/ensemble_spec.json")
 assert recovered.n_runs == spec.n_runs
 ```
 
@@ -61,6 +61,14 @@ version, Python version, and timestamp:
 The file is suitable for committing to a version control system alongside the
 code and results that produced it.
 
+:::{note}
+Module-level functions `dump_spec(spec, path)` and `load_spec(path)` are also
+available from `pyens.serialize` for situations where you prefer importing
+functions directly — for example, when integrating with other tooling or writing
+generic utilities that accept any spec as an argument. The methods and functions
+are equivalent.
+:::
+
 ---
 
 ## Value encoding
@@ -92,8 +100,8 @@ spec = EnsembleSpec(inputs={
         along=sites,
     ),
 })
-dump_spec(spec, "spec.json")
-recovered = load_spec("spec.json")
+spec.dump("spec.json")
+recovered = EnsembleSpec.load("spec.json")
 # Values are Path objects, not strings
 ```
 
@@ -137,14 +145,14 @@ class name:
 This is enough information to identify what was used, even if the exact object
 cannot be reconstructed.
 
-**By default, `load_spec` raises `SerializationError` for unknown-tagged
-values**, because loading a spec with unresolvable values produces an incomplete
-spec that would silently produce wrong inputs. Pass `strict=False` to allow
-loading anyway — unknown values are replaced by their repr string:
+**By default, `load()` raises `SerializationError` for unknown-tagged values**,
+because loading a spec with unresolvable values produces an incomplete spec that
+would silently produce wrong inputs. Pass `strict=False` to allow loading anyway
+— unknown values are replaced by their repr string:
 
 ```python
 # For logging / auditing only — not for re-running:
-spec = load_spec("spec.json", strict=False)
+spec = EnsembleSpec.load("spec.json", strict=False)
 ```
 
 To enable full round-tripping for custom types, register a
@@ -177,11 +185,11 @@ register_codec(ParameterSetCodec())
 ```
 
 After registration, `ParameterSet` values in `Fixed` and `Grid` fields will
-round-trip through `dump_spec` / `load_spec` exactly.
+round-trip through `dump()` and `load()` exactly.
 
-Register codecs before calling `dump_spec` or `load_spec`. A good place to
-register them is at module import time in the same file that defines your
-model or parameter types.
+Register codecs before calling `dump()` or `load()`. A good place to register
+them is at module import time in the same file that defines your model or
+parameter types.
 
 ---
 
@@ -197,10 +205,10 @@ base_spec = EnsembleSpec(inputs={
 })
 
 param_map = base_spec.freeze(free=["parameters"])
-dump_spec(param_map, "param_map.json")
+param_map.dump("param_map.json")
 
 # Later — reload and use:
-recovered = load_spec("param_map.json")   # returns a PartialSpec
+recovered = PartialSpec.load("param_map.json")
 p_axis = Axis("param_set", size=10)
 runnable = recovered(parameters=Grid(proposed_params, along=p_axis))
 ```
@@ -218,7 +226,7 @@ A reproducible production ensemble typically looks like this:
 
 ```python
 spec = EnsembleSpec(inputs={...})
-dump_spec(spec, "runs/2026-05-29_baseline/spec.json")
+spec.dump("runs/2026-05-29_baseline/spec.json")
 ```
 
 **2. Run the ensemble**
@@ -242,7 +250,7 @@ git commit -m "Save spec for baseline ensemble (paper Fig. 3)"
 **4. Verify later**
 
 ```python
-spec = load_spec("runs/2026-05-29_baseline/spec.json")
+spec = EnsembleSpec.load("runs/2026-05-29_baseline/spec.json")
 print(spec.describe())
 ```
 
