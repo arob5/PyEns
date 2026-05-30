@@ -424,6 +424,67 @@ class TestFileIO:
 
 
 # ---------------------------------------------------------------------------
+# Convenience methods: spec.dump() / EnsembleSpec.load() / PartialSpec.load()
+# ---------------------------------------------------------------------------
+
+class TestConvenienceMethods:
+    def test_ensemble_spec_dump_and_load(self, tmp_path: Path):
+        ax = Axis("site", labels=["A", "B"])
+        spec = EnsembleSpec(inputs={
+            "params":  Fixed({"k": 1.0}),
+            "climate": Grid(["dry", "wet"], along=ax),
+        })
+        path = tmp_path / "spec.json"
+        spec.dump(path)
+        recovered = EnsembleSpec.load(path)
+        assert isinstance(recovered, EnsembleSpec)
+        assert recovered.n_runs == spec.n_runs
+
+    def test_partial_spec_dump_and_load(self, tmp_path: Path):
+        ax = Axis("site", size=2)
+        spec = EnsembleSpec(inputs={
+            "params":  Fixed("base"),
+            "climate": Grid(["a", "b"], along=ax),
+        })
+        partial = spec.freeze(free=["params"])
+        path = tmp_path / "partial.json"
+        partial.dump(path)
+        recovered = PartialSpec.load(path)
+        assert isinstance(recovered, PartialSpec)
+        assert "params" in recovered.free_field_names
+
+    def test_ensemble_spec_load_rejects_partial(self, tmp_path: Path):
+        spec = EnsembleSpec(inputs={"x": Fixed(1), "y": Fixed(2)})
+        partial = spec.freeze(free=["x"])
+        path = tmp_path / "partial.json"
+        partial.dump(path)
+        with pytest.raises(TypeError, match="PartialSpec"):
+            EnsembleSpec.load(path)
+
+    def test_partial_spec_load_rejects_ensemble(self, tmp_path: Path):
+        spec = EnsembleSpec(inputs={"x": Fixed(1)})
+        path = tmp_path / "spec.json"
+        spec.dump(path)
+        with pytest.raises(TypeError, match="EnsembleSpec"):
+            PartialSpec.load(path)
+
+    def test_dump_produces_same_file_as_dump_spec(self, tmp_path: Path):
+        ax = Axis("x", size=3)
+        spec = EnsembleSpec(inputs={"v": Grid([1, 2, 3], along=ax)})
+        path_method = tmp_path / "method.json"
+        path_func = tmp_path / "func.json"
+        spec.dump(path_method)
+        dump_spec(spec, path_func)
+        # Both files should have identical structure (timestamps will differ)
+        import json
+        d_method = json.load(path_method.open())
+        d_func = json.load(path_func.open())
+        assert d_method["axes"] == d_func["axes"]
+        assert d_method["fields"] == d_func["fields"]
+        assert d_method["__spec_type__"] == d_func["__spec_type__"]
+
+
+# ---------------------------------------------------------------------------
 # Correctness: recovered spec produces same runs as original
 # ---------------------------------------------------------------------------
 

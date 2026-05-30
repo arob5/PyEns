@@ -97,12 +97,10 @@ unchanged.
 ### Save for reproducibility
 
 ```python
-from pyens import dump_spec, load_spec
-
-dump_spec(spec, "runs/2026-05-29/spec.json")
+spec.dump("runs/2026-05-29/spec.json")
 
 # Later — exact reconstruction
-spec = load_spec("runs/2026-05-29/spec.json")
+spec = EnsembleSpec.load("runs/2026-05-29/spec.json")
 ```
 
 The JSON file is human-readable, records the PyEns version and timestamp, and
@@ -125,9 +123,13 @@ is suitable for committing alongside results in version control.
 
 ## Documentation
 
-- [Data Model](docs/user_guide/data_model.md) — axes, fields, specs, zip vs Cartesian product
-- [Running an Ensemble](docs/user_guide/running.md) — backends, `EnsembleRunner`, results
-- [Reproducibility and Serialization](docs/user_guide/reproducibility.md) — saving specs, custom codecs, production workflow
+Full documentation is at **https://arob5.github.io/PyEns/**.
+
+| Page | Description |
+|---|---|
+| [Data Model](https://arob5.github.io/PyEns/user_guide/data_model.html) | Axes, fields, specs — zip vs Cartesian product |
+| [Running an Ensemble](https://arob5.github.io/PyEns/user_guide/running.html) | Backends, `EnsembleRunner`, structured results |
+| [Reproducibility and Serialization](https://arob5.github.io/PyEns/user_guide/reproducibility.html) | Saving specs, custom codecs, production workflow |
 
 ---
 

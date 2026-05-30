@@ -1,0 +1,49 @@
+name: Build and deploy docs
+
+# Builds Sphinx documentation and publishes it to GitHub Pages.
+#
+# One-time setup required in the repository settings:
+#   Settings → Pages → Source → "Deploy from a branch" → branch: gh-pages / root
+#
+# After the first successful run, the docs will be live at:
+#   https://arob5.github.io/PyEns/
+
+on:
+  push:
+    branches: [main]
+  # Allow triggering a manual build from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package and doc dependencies
+        run: |
+          pip install -e .
+          pip install \
+            sphinx>=9.0 \
+            pydata-sphinx-theme>=0.18 \
+            myst-parser>=5.1 \
+            sphinx-copybutton>=0.5
+
+      - name: Build HTML docs
+        run: sphinx-build -b html docs docs/_build/html
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/_build/html
+          # Keep a clean gh-pages branch (no history accumulation)
+          force_orphan: true

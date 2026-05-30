@@ -19,6 +19,12 @@ All user-visible API changes are documented here.
 
 ### New features
 
+- **`EnsembleSpec.dump(path)` / `EnsembleSpec.load(path)`** and
+  **`PartialSpec.dump(path)` / `PartialSpec.load(path)`** — convenience methods
+  for writing and reading specs without importing from `pyens.serialize` directly.
+  `load()` is a class method that raises `TypeError` if the file contains the
+  wrong spec type.
+
 - **Serialization** (`pyens.serialize`): `EnsembleSpec` and `PartialSpec` can now
   be written to and read from JSON files.
   - `dump_spec(spec, path)` — write a spec to a JSON file with a metadata envelope

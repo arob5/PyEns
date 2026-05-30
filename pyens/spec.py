@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+from pathlib import Path
 from typing import Any, Iterator
 
 from pyens.axis import Axis
@@ -284,6 +285,61 @@ class EnsembleSpec:
         }
 
     # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
+    def dump(self, path: str | Path, *, indent: int = 2) -> None:
+        """Write this spec to a JSON file.
+
+        Convenience wrapper around :func:`pyens.serialize.dump_spec`. The
+        file can be reloaded with :func:`pyens.serialize.load_spec` or
+        :meth:`EnsembleSpec.load`.
+
+        Args:
+            path: Destination file path. The parent directory must exist.
+            indent: JSON indentation level (default ``2``). Pass ``None``
+                for compact single-line output.
+
+        Examples:
+            >>> spec.dump("runs/2026-05-29/spec.json")
+        """
+        from pyens.serialize import dump_spec  # lazy import — avoids circular dep
+        dump_spec(self, path, indent=indent)
+
+    @classmethod
+    def load(cls, path: str | Path, *, strict: bool = True) -> EnsembleSpec:
+        """Read an ``EnsembleSpec`` from a JSON file written by :meth:`dump`.
+
+        Args:
+            path: Path to the JSON file.
+            strict: If ``True`` (default), raises
+                :class:`~pyens.serialize.SerializationError` for values that
+                cannot be reconstructed. If ``False``, substitutes the stored
+                repr string.
+
+        Returns:
+            The deserialised ``EnsembleSpec``.
+
+        Raises:
+            TypeError: If the file contains a ``PartialSpec`` rather than an
+                ``EnsembleSpec``.
+            FileNotFoundError: If *path* does not exist.
+            ~pyens.serialize.SerializationError: If the file cannot be parsed
+                or a value cannot be reconstructed (when ``strict=True``).
+
+        Examples:
+            >>> spec = EnsembleSpec.load("runs/2026-05-29/spec.json")
+        """
+        from pyens.serialize import load_spec  # lazy import — avoids circular dep
+        result = load_spec(path, strict=strict)
+        if not isinstance(result, cls):
+            raise TypeError(
+                f"File contains a {type(result).__name__}, not an EnsembleSpec. "
+                f"Use PartialSpec.load() instead."
+            )
+        return result
+
+    # ------------------------------------------------------------------
     # Partial application
     # ------------------------------------------------------------------
 
@@ -391,6 +447,54 @@ class PartialSpec:
     def free_field_names(self) -> frozenset[str]:
         """Names of the fields that must be supplied when calling this spec."""
         return frozenset(self._free)
+
+    def dump(self, path: str | Path, *, indent: int = 2) -> None:
+        """Write this ``PartialSpec`` to a JSON file.
+
+        Convenience wrapper around :func:`pyens.serialize.dump_spec`. The
+        file can be reloaded with :meth:`PartialSpec.load`.
+
+        Args:
+            path: Destination file path. The parent directory must exist.
+            indent: JSON indentation level (default ``2``).
+
+        Examples:
+            >>> param_map.dump("runs/param_map.json")
+        """
+        from pyens.serialize import dump_spec  # lazy import — avoids circular dep
+        dump_spec(self, path, indent=indent)
+
+    @classmethod
+    def load(cls, path: str | Path, *, strict: bool = True) -> PartialSpec:
+        """Read a ``PartialSpec`` from a JSON file written by :meth:`dump`.
+
+        Args:
+            path: Path to the JSON file.
+            strict: If ``True`` (default), raises
+                :class:`~pyens.serialize.SerializationError` for values that
+                cannot be reconstructed.
+
+        Returns:
+            The deserialised ``PartialSpec``.
+
+        Raises:
+            TypeError: If the file contains an ``EnsembleSpec`` rather than
+                a ``PartialSpec``.
+            FileNotFoundError: If *path* does not exist.
+            ~pyens.serialize.SerializationError: If the file cannot be parsed
+                or a value cannot be reconstructed (when ``strict=True``).
+
+        Examples:
+            >>> param_map = PartialSpec.load("runs/param_map.json")
+        """
+        from pyens.serialize import load_spec  # lazy import — avoids circular dep
+        result = load_spec(path, strict=strict)
+        if not isinstance(result, cls):
+            raise TypeError(
+                f"File contains a {type(result).__name__}, not a PartialSpec. "
+                f"Use EnsembleSpec.load() instead."
+            )
+        return result
 
     def __call__(self, **kwargs: FieldSpec | Any) -> EnsembleSpec:
         """Bind the free fields and return a complete ``EnsembleSpec``.
