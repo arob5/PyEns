@@ -19,11 +19,8 @@ HPC cluster.
 pip install pyens
 ```
 
-For HPC execution via [Parsl](https://parsl-project.org):
-
-```bash
-pip install pyens[parsl]
-```
+Running on a Grid Engine cluster (`qsub`) needs no extras: see
+[Running on a Grid Engine Cluster](https://arob5.github.io/PyEns/user_guide/gridengine.html).
 
 ---
 
@@ -92,7 +89,15 @@ result = runner.run(spec)
 ```
 
 Switch to an HPC cluster by swapping the backend — the spec and model are
-unchanged.
+unchanged:
+
+```python
+from pyens.backends import GridEngineBackend
+
+backend = GridEngineBackend(walltime="01:00:00", n_jobs=50,
+                            work_dir="/projectnb/mygroup/me/pyens_batches")
+result = EnsembleRunner(my_model, backend).run(spec)
+```
 
 ### Save for reproducibility
 
@@ -129,6 +134,7 @@ Full documentation is at **https://arob5.github.io/PyEns/**.
 |---|---|
 | [Data Model](https://arob5.github.io/PyEns/user_guide/data_model.html) | Axes, fields, specs — zip vs Cartesian product |
 | [Running an Ensemble](https://arob5.github.io/PyEns/user_guide/running.html) | Backends, `EnsembleRunner`, structured results |
+| [Running on a Grid Engine Cluster](https://arob5.github.io/PyEns/user_guide/gridengine.html) | `GridEngineBackend`: array jobs via `qsub`, failure handling |
 | [Reproducibility and Serialization](https://arob5.github.io/PyEns/user_guide/reproducibility.html) | Saving specs, custom codecs, production workflow |
 
 ---

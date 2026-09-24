@@ -85,20 +85,40 @@ This is a living document. Update it as decisions are made and phases complete.
 
 ---
 
-## Phase 3: HPC Backend (Parsl + SGE)
+## Phase 3: HPC Backend (Grid Engine)
 
 **Goal:** Run ensembles on BU SCC without changing any spec or model code.
 
-### 3.1 `ParslBackend` (`pyens/backends/parsl.py`)
-- [ ] Wraps Parsl `HighThroughputExecutor` + `GridEngineProvider`
-- [ ] Constructor accepts standard Parsl provider kwargs + BU SCC presets
-- [ ] `BUSCCConfig` helper with sensible defaults for BU SCC (module loads, OMP threads, memory)
-- [ ] Lazy import of `parsl` (not a hard dependency)
-- [ ] Tests: mocked Parsl executor (no actual HPC needed in CI)
+### 3.1 `GridEngineBackend` (`pyens/backends/gridengine.py`) ✓
+- [x] One Grid Engine array job (`qsub -t 1-K`) per `map` call; no new dependencies
+- [x] `n_jobs` / `runs_per_job`, `slots` (`-pe`, N worker processes per task),
+      `max_concurrent` (`-tc`), required `walltime` (`h_rt`)
+- [x] Raw `directives` and `setup` lines; no group presets in PyEns
+      (`-P`, `-l buyin`, forwarded environment belong in the consumer)
+- [x] File-based protocol in a batch directory on a shared filesystem
+      (`_batch.py`); framed per-run records so a dead task keeps finished runs
+      (`_chunk.py`); `python -m pyens.backends._gridengine_worker`
+- [x] Failure semantics: `TaskFailedError` (died / error_state / timeout /
+      worker_error), `GridEngineError` on submission failure, `qdel` on
+      Ctrl-C / SIGTERM / SIGHUP
+- [x] Tests: fake `qsub`/`qstat`/`qdel`/`qacct` with fault injection; backend
+      contract suite across all backends; manual SCC checks in `tests/cluster/`
+- Decision: no automatic retries (task deaths are usually deterministic)
+- Decision: Parsl deferred — see 3.3
 
-### 3.2 Backend configuration helpers
-- [ ] `SGEConfig` dataclass — typed interface for common SGE options
-- [ ] `BUSCCConfig(n_cores, memory_gb, walltime, env_setup)` — BU SCC preset
+### 3.2 Portable exceptions ✓
+- [x] `RemoteError` stand-in for exceptions that cannot be unpickled
+      (e.g. pySIPNET's `SIPNETRunError`); used by `LocalBackend` and
+      `GridEngineBackend`
+
+### 3.3 `ParslBackend` (deferred, issue #5)
+- [ ] Persistent pilot blocks for many-iteration, moderate-size workloads
+      (multi-site MH), where one queue wait per `map` call is prohibitive
+- [ ] Needs an optional backend lifecycle (`close()` / context manager)
+- [ ] First verify worker-to-interchange connectivity on SCC with one small job
+- [ ] Reuse `_chunk.py` and `errors.py`
+- Dropped: `BUSCCConfig` / `SGEConfig` presets in PyEns (site and group
+  settings belong in consumer code)
 
 ---
 
@@ -156,5 +176,5 @@ This is a living document. Update it as decisions are made and phases complete.
 |---|---|---|
 | M1 | Phase 1 complete | Pure Python, no deps |
 | M2 | Phase 2 complete | Local multiprocessing |
-| M3 | Phase 3 complete | BU SCC |
+| M3 | Phase 3.1–3.2 complete | BU SCC |
 | M4 | Phases 4–5 | pySIPNET + ProbPipe |
