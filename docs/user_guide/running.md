@@ -215,14 +215,15 @@ other runs are unaffected.
 ### GridEngineBackend
 
 `GridEngineBackend` runs each ensemble evaluation as one Grid Engine array
-job, submitted with `qsub`, on a cluster such as BU's SCC:
+job, submitted with `qsub`. It is only relevant if you run on a Grid Engine
+cluster:
 
 ```python
 from pyens.backends import GridEngineBackend
 
 backend = GridEngineBackend(
     walltime="01:00:00",
-    work_dir="/projectnb/mygroup/me/pyens_batches",
+    work_dir="/shared/myproject/pyens_batches",
     n_jobs=50,
     directives=["-P mygroup"],
 )

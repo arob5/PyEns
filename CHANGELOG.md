@@ -20,7 +20,7 @@ All user-visible API changes are documented here.
 ### New features
 
 - **`GridEngineBackend`** — runs each `map` call as one Grid Engine array job
-  (`qsub -t 1-K`), for clusters such as BU SCC. No extra dependencies.
+  (`qsub -t 1-K`), for Grid Engine clusters. No extra dependencies.
   - Split the runs with `n_jobs=K` or `runs_per_job=R`; `slots=N` requests
     `-pe <parallel_env> N` and runs each task's chunk in `N` processes;
     `max_concurrent` maps to `-tc`; `walltime` (required) maps to `-l h_rt`.

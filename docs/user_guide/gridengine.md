@@ -3,8 +3,14 @@
 [Running an Ensemble](running.md) introduced backends that run on the machine
 you are using. This page covers `GridEngineBackend`, which runs an ensemble on
 a cluster managed by Grid Engine (SGE, Open Grid Scheduler, Univa/Altair Grid
-Engine), the scheduler behind `qsub`, `qstat` and `qdel` on clusters such as
-Boston University's SCC.
+Engine), the scheduler behind `qsub`, `qstat` and `qdel` on many HPC
+clusters.
+
+:::{note}
+This page only applies if you run ensembles on a Grid Engine cluster. On a
+single machine, use `SequentialBackend` or `LocalBackend` (see
+[Running an Ensemble](running.md)).
+:::
 
 `GridEngineBackend` needs no extra dependencies. Your spec and model code do
 not change: you swap the backend.
@@ -23,7 +29,7 @@ logging.basicConfig(level=logging.INFO)   # show submission and progress message
 
 backend = GridEngineBackend(
     walltime="01:00:00",                                # per array task
-    work_dir="/projectnb/mygroup/me/pyens_batches",     # on a shared filesystem
+    work_dir="/shared/myproject/pyens_batches",     # on a shared filesystem
     n_jobs=50,                                          # split the runs into 50 tasks
     directives=["-P mygroup"],                          # any extra qsub options
     setup=["export OMP_NUM_THREADS=1"],                 # shell lines run before each task
@@ -119,8 +125,8 @@ small = replace(backend, n_jobs=5, walltime="00:10:00")
 Array tasks run in fresh processes on compute nodes, so:
 
 - **`work_dir` must be on a filesystem shared by the driver and the compute
-  nodes** (on SCC, `/projectnb` or `/restricted/projectnb`, not `/tmp` or a
-  node-local `$TMPDIR`).
+  nodes**, such as a project or scratch filesystem, not `/tmp` or a
+  node-local `$TMPDIR`.
 - **The worker uses the same Python interpreter as the driver**
   (`sys.executable`), so it sees the same installed packages. That
   interpreter and its virtual environment must also be on a shared
@@ -135,7 +141,7 @@ Array tasks run in fresh processes on compute nodes, so:
 - **Tasks don't inherit your shell environment.** Forward variables with a
   directive (`"-v OMP_NUM_THREADS"`, or `"-V"` for everything) or set them in
   `setup` lines. `setup` is also the place for `module load` commands, but
-  the job shell is not a login shell, so on many clusters (SCC included) the
+  the job shell is not a login shell, so on many clusters the
   `module` command is not defined until you run `source /etc/profile`:
 
   ```python
@@ -221,10 +227,9 @@ The driver process stays alive for the whole `map` call: submitting,
 polling, and collecting results. You have two options:
 
 - **As a batch job itself (recommended for long runs).** Submit your driver
-  script as an ordinary one-slot job with a generous walltime. Compute nodes
-  on SCC can submit jobs, so the driver's array jobs are submitted from
-  there. The driver survives your laptop sleeping or your SSH connection
-  dropping.
+  script as an ordinary one-slot job with a generous walltime. This requires
+  compute nodes to be submit hosts, which is common; `qconf -ss` lists them.
+  The driver survives your laptop sleeping or your SSH connection dropping.
 - **On a login node**, inside `tmux` or `screen`. Polling costs almost no
   CPU, but pickling large ensembles and your algorithm's own computation
   may not be appropriate on a shared login node.
@@ -291,30 +296,34 @@ pyens-20260923-141502-1a2b3c4d/
 
 ---
 
-## Example: BU SCC
+## Example: a helper for your cluster
+
+Settings specific to your site or group (project names, queues, resource
+requests, environment setup) belong in your own code. A small function keeps
+them in one place:
 
 ```python
 from pyens.backends import GridEngineBackend
 
-def scc_backend(n_jobs: int, walltime: str) -> GridEngineBackend:
+def cluster_backend(n_jobs: int, walltime: str) -> GridEngineBackend:
     return GridEngineBackend(
         walltime=walltime,
-        work_dir="/projectnb/mygroup/me/pyens_batches",
+        work_dir="/shared/myproject/pyens_batches",
         n_jobs=n_jobs,
-        directives=["-P mygroup"],
-        setup=["export OMP_NUM_THREADS=1"],
+        directives=["-P myproject"],
+        setup=["source /etc/profile", "export OMP_NUM_THREADS=1"],
         max_concurrent=200,
     )
 ```
 
-On SCC, remember:
+Two things to keep in mind on shared clusters:
 
-- Your home directory has a small quota. Grid Engine writes job logs to your
-  home directory unless told otherwise; `GridEngineBackend` always writes
-  them into the batch directory.
-- `h_rt` defaults to 12 hours on SCC if unset. `GridEngineBackend` requires
-  an explicit `walltime`, so a short evaluation doesn't reserve 12-hour
-  slots.
+- Home directories often have small quotas. Grid Engine writes job logs to
+  your home directory unless told otherwise; `GridEngineBackend` always
+  writes them into the batch directory.
+- Many sites apply a long default run-time limit when a job requests none.
+  `GridEngineBackend` requires an explicit `walltime`, so a short evaluation
+  doesn't reserve long-running slots.
 
 ---
 

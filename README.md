@@ -95,7 +95,7 @@ unchanged:
 from pyens.backends import GridEngineBackend
 
 backend = GridEngineBackend(walltime="01:00:00", n_jobs=50,
-                            work_dir="/projectnb/mygroup/me/pyens_batches")
+                            work_dir="/shared/myproject/pyens_batches")
 result = EnsembleRunner(my_model, backend).run(spec)
 ```
 

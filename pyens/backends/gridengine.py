@@ -124,8 +124,8 @@ class GridEngineBackend(Backend):
             requests ``-pe <parallel_env> <slots>`` and runs its chunk in
             that many worker processes.
         parallel_env: Name of the shared-memory parallel environment used
-            when ``slots > 1`` (``"omp"`` on BU SCC; often ``"smp"``
-            elsewhere).
+            when ``slots > 1``, e.g. ``"omp"`` or ``"smp"``; ``qconf -spl``
+            lists the names your cluster defines.
         directives: Extra ``qsub`` options, one per string, written as
             ``#$`` lines in the job script, e.g. ``["-P myproject",
             "-l mem_per_core=4G"]``. Options the backend sets itself
@@ -166,7 +166,7 @@ class GridEngineBackend(Backend):
 
             backend = GridEngineBackend(
                 walltime="01:00:00",
-                work_dir="/projectnb/mygroup/me/pyens_batches",
+                work_dir="/shared/myproject/pyens_batches",
                 n_jobs=50,
                 directives=["-P mygroup"],
                 setup=["export OMP_NUM_THREADS=1"],
@@ -177,7 +177,7 @@ class GridEngineBackend(Backend):
 
             backend = GridEngineBackend(
                 walltime="02:00:00",
-                work_dir="/projectnb/mygroup/me/pyens_batches",
+                work_dir="/shared/myproject/pyens_batches",
                 runs_per_job=2000,
                 slots=4,
                 max_concurrent=20,
