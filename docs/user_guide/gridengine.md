@@ -34,7 +34,9 @@ result = runner.run(spec)
 ```
 
 `runner.run(spec)` submits one job, waits for it to finish, and returns an
-`EnsembleResult` exactly as `LocalBackend` would.
+`EnsembleResult` exactly as `LocalBackend` would. `map` returns as soon as
+every task has written its results; `qstat` may keep listing the tasks for
+up to a minute while Grid Engine reaps them.
 
 ---
 
@@ -132,7 +134,13 @@ Array tasks run in fresh processes on compute nodes, so:
   paths in your inputs resolve the same way as on the driver.
 - **Tasks don't inherit your shell environment.** Forward variables with a
   directive (`"-v OMP_NUM_THREADS"`, or `"-V"` for everything) or set them in
-  `setup` lines. `setup` is also the place for `module load` commands.
+  `setup` lines. `setup` is also the place for `module load` commands, but
+  the job shell is not a login shell, so on many clusters (SCC included) the
+  `module` command is not defined until you run `source /etc/profile`:
+
+  ```python
+  setup=["source /etc/profile", "module load gcc"]
+  ```
 
 Pickling errors, and a model defined in `__main__`, are reported **before**
 anything is submitted.

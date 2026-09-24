@@ -265,7 +265,13 @@ def main() -> int:
         watcher.stop.set()
         watcher.join(timeout=10)
         ours = _job_ids_in(work_dir)
+        # Finished tasks stay listed for up to a minute or so while Grid
+        # Engine reaps them; only delete what is still there after that.
+        deadline = time.time() + 150
         still = [j for j in ours if j in _qstat_jobs()]
+        while still and time.time() < deadline:
+            time.sleep(15)
+            still = [j for j in ours if j in _qstat_jobs()]
         for job_id in still:
             print(f"Deleting leftover job {job_id}")
             subprocess.run(["qdel", job_id], check=False)

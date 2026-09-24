@@ -132,7 +132,9 @@ class GridEngineBackend(Backend):
             (``-t``, ``-tc``, ``-o``, ``-e``, ``-j``, ``-N``, ``-pe``,
             ``-wd``, ``-cwd``, ``-S``, ``-sync`` and ``h_rt``) are rejected.
         setup: Shell lines run in each task before the worker starts, e.g.
-            ``["module load gcc", "export OMP_NUM_THREADS=1"]``.
+            ``["source /etc/profile", "module load gcc",
+            "export OMP_NUM_THREADS=1"]``. The job shell is not a login
+            shell, so ``module`` often needs ``source /etc/profile`` first.
         max_concurrent: Maximum number of tasks of one job running at once
             (``-tc``). ``None`` leaves it to the scheduler.
         python: Interpreter that runs the worker on the compute node.
