@@ -102,7 +102,7 @@ This is a living document. Update it as decisions are made and phases complete.
       worker_error), `GridEngineError` on submission failure, `qdel` on
       Ctrl-C / SIGTERM / SIGHUP
 - [x] Tests: fake `qsub`/`qstat`/`qdel`/`qacct` with fault injection; backend
-      contract suite across all backends; manual SCC checks in `tests/cluster/`
+      contract suite across all backends; manual cluster checks in `tests/cluster/gridengine_checks.py`
 - Decision: no automatic retries (task deaths are usually deterministic)
 - Decision: Parsl deferred — see 3.3
 

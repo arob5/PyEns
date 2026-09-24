@@ -5,7 +5,7 @@ without ``--submit``. Each check submits exactly one small array job
 running trivial workloads (arithmetic and sleeps), never retries, and
 deletes its job on any failure. Run from the repository root::
 
-    python -m tests.cluster.scc_checks s1 --work-dir /path/on/shared/fs \\
+    python -m tests.cluster.gridengine_checks s1 --work-dir /path/on/shared/fs \\
         --directive "-P myproject" --submit
 
 Without ``--submit`` the job script is printed and nothing is submitted.
