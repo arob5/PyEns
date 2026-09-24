@@ -43,6 +43,16 @@ All user-visible API changes are documented here.
   - `PartialSpec` serializes with `"FreeField"` placeholders and a `free_fields`
     list; `load_spec` returns a `PartialSpec` in this case.
 
+### Bug fixes
+
+- **`LocalBackend` no longer breaks when a model raises an exception that cannot
+  be unpickled.** Previously, an exception class whose `__init__` requires
+  keyword-only arguments (such as pySIPNET's `SIPNETRunError`) broke the whole
+  process pool: that run and every later one came back as `BrokenProcessPool`.
+  Such exceptions are now returned as a `RemoteError` carrying the original type
+  name, message, traceback text and picklable attributes, and the other runs are
+  unaffected. Exceptions that do unpickle keep their type, as before.
+
 ### Documentation
 
 - New user guide page: **Reproducibility and Serialization** covering `dump_spec`,
