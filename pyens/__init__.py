@@ -19,6 +19,10 @@ Execution layer:
   parallelism; recommended for debugging).
 - :class:`LocalBackend` — runs model calls in parallel worker processes via
   :mod:`concurrent.futures`.
+- :class:`RemoteError` — stand-in for a model exception that could not be
+  sent back from a worker process intact.
+- :class:`TaskFailedError` — result of a run whose cluster task failed
+  before producing it.
 
 Result layer:
 
@@ -40,7 +44,13 @@ Serialization:
 from __future__ import annotations
 
 from pyens.axis import Axis
-from pyens.backends import Backend, LocalBackend, SequentialBackend
+from pyens.backends import (
+    Backend,
+    LocalBackend,
+    RemoteError,
+    SequentialBackend,
+    TaskFailedError,
+)
 from pyens.fields import FieldSpec, Fixed, Grid
 from pyens.result import EnsembleResult, RunRecord
 from pyens.runner import EnsembleRunner
@@ -68,6 +78,8 @@ __all__ = [
     "Backend",
     "SequentialBackend",
     "LocalBackend",
+    "RemoteError",
+    "TaskFailedError",
     # Results
     "EnsembleResult",
     "RunRecord",
