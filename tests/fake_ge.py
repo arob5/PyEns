@@ -223,6 +223,14 @@ def qstat(args: list[str]) -> int:
                 f"    </job_list>\n"
             )
             (running if state == "r" else pending).append(entry)
+    if "-xml" not in args:
+        print("job-ID  prior   name       user         state submit/start at     queue")
+        print("-" * 70)
+        for entry in running + pending:
+            number = entry.split("<JB_job_number>")[1].split("<")[0]
+            state = entry.split("<state>")[1].split("<")[0]
+            print(f"{number} 0.5 fake arober {state} 01/01/2026 00:00:00 all.q")
+        return 0
     print("<?xml version='1.0'?>\n<job_info>\n  <queue_info>\n" + "".join(running)
           + "  </queue_info>\n  <job_info>\n" + "".join(pending)
           + "  </job_info>\n</job_info>")

@@ -92,3 +92,25 @@ def return_kw_only_error(x: int) -> Any:
 
 def getenv_pair() -> tuple[str | None, str | None]:
     return os.environ.get("PYENS_TEST_VAR"), os.environ.get("PYENS_SETUP_VAR")
+
+
+def by_mode(mode: str, x: int) -> Any:
+    """Behave according to *mode*; used by the cluster checks."""
+    if mode == "ok":
+        return x
+    if mode == "kwonly":
+        raise KwOnlyError("simulated SIPNET failure", returncode=2, stderr="bad param")
+    if mode == "unpicklable":
+        return Unpicklable()
+    if mode == "exit":
+        os._exit(5)
+    if mode == "sleep":
+        time.sleep(x)
+        return x
+    raise ValueError(f"unknown mode {mode!r}")
+
+
+def host_pid(x: int, delay: float) -> tuple[int, str, int]:
+    """Sleep, then report which host and process ran the run."""
+    time.sleep(delay)
+    return x, os.uname().nodename, os.getpid()
