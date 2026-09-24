@@ -19,6 +19,8 @@ Execution layer:
   parallelism; recommended for debugging).
 - :class:`LocalBackend` — runs model calls in parallel worker processes via
   :mod:`concurrent.futures`.
+- :class:`GridEngineBackend` — runs each ``map`` call as one Grid Engine
+  array job submitted with ``qsub``.
 - :class:`RemoteError` — stand-in for a model exception that could not be
   sent back from a worker process intact.
 - :class:`TaskFailedError` — result of a run whose cluster task failed
@@ -46,6 +48,7 @@ from __future__ import annotations
 from pyens.axis import Axis
 from pyens.backends import (
     Backend,
+    GridEngineBackend,
     LocalBackend,
     RemoteError,
     SequentialBackend,
@@ -78,6 +81,7 @@ __all__ = [
     "Backend",
     "SequentialBackend",
     "LocalBackend",
+    "GridEngineBackend",
     "RemoteError",
     "TaskFailedError",
     # Results

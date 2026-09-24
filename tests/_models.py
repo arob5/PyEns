@@ -83,3 +83,12 @@ class BrokenOnLoad:
 
 def _raise_on_load() -> None:
     raise ImportError("simulated missing dependency on the compute node")
+
+
+def return_kw_only_error(x: int) -> Any:
+    """Return (not raise) an exception that cannot be unpickled on the driver."""
+    return KwOnlyError("returned", returncode=x, stderr="")
+
+
+def getenv_pair() -> tuple[str | None, str | None]:
+    return os.environ.get("PYENS_TEST_VAR"), os.environ.get("PYENS_SETUP_VAR")
