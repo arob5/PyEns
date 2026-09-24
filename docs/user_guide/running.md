@@ -205,6 +205,36 @@ Use `LocalBackend` when:
   processes bypass Python's GIL).
 - The model function and all field values satisfy the pickling requirement.
 
+Exceptions raised by the model travel back from the worker processes by
+pickling too. A few exception classes cannot be unpickled, typically because
+their `__init__` requires keyword-only arguments. `LocalBackend` returns such
+an exception as a `RemoteError` that keeps its type name (`type_name`),
+message, traceback text and picklable attributes (`attributes`), and the
+other runs are unaffected.
+
+### GridEngineBackend
+
+`GridEngineBackend` runs each ensemble evaluation as one Grid Engine array
+job, submitted with `qsub`. It is only relevant if you run on a Grid Engine
+cluster:
+
+```python
+from pyens.backends import GridEngineBackend
+
+backend = GridEngineBackend(
+    walltime="01:00:00",
+    work_dir="/shared/myproject/pyens_batches",
+    n_jobs=50,
+    directives=["-P mygroup"],
+)
+runner = EnsembleRunner(my_model, backend)
+```
+
+It has the same guarantees as the other backends. Runs lost because their
+cluster task failed are returned as `TaskFailedError` instances. See
+[Running on a Grid Engine Cluster](gridengine.md) for sizing, environment
+requirements, failure handling, and where to run the driver.
+
 ---
 
 ## EnsembleResult
@@ -237,6 +267,11 @@ for record in result:
 The `failed` property is `True` when `output` is an exception instance and
 `False` otherwise. It is the right way to distinguish successful runs from
 failed ones.
+
+With multi-process and cluster backends, a failed run's `output` can also be
+a `RemoteError` (an exception that could not be sent back from the worker
+intact) or a `TaskFailedError` (the run never finished because its cluster
+task failed). Both are exceptions, so `failed` is `True` for them too.
 
 ### Counts
 

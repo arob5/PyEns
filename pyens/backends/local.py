@@ -7,6 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 from pyens.backends.base import Backend
+from pyens.backends.errors import portable_exception
 
 
 class LocalBackend(Backend):
@@ -33,6 +34,13 @@ class LocalBackend(Backend):
         to reproduce the failure with a full traceback, then fix the
         pickling issue before returning to ``LocalBackend``.
 
+    Exceptions raised by the model travel back from the worker the same
+    way. If one cannot be unpickled (typically because its ``__init__``
+    requires keyword-only arguments), it is returned as a
+    :class:`~pyens.backends.errors.RemoteError` carrying its type name,
+    message, traceback and picklable attributes, and the remaining runs are
+    unaffected.
+
     Args:
         n_workers: Number of worker processes. Defaults to ``None``, which
             lets :class:`ProcessPoolExecutor` choose (typically
@@ -49,7 +57,7 @@ class LocalBackend(Backend):
     ) -> list[Any]:
         runs_list = list(runs)
         with ProcessPoolExecutor(max_workers=self._n_workers) as executor:
-            futures = [executor.submit(fn, **inputs) for inputs in runs_list]
+            futures = [executor.submit(_call_portable, fn, inputs) for inputs in runs_list]
         results: list[Any] = []
         for future in futures:
             try:
@@ -57,3 +65,18 @@ class LocalBackend(Backend):
             except Exception as exc:
                 results.append(exc)
         return results
+
+
+def _call_portable(fn: Callable[..., Any], inputs: dict[str, Any]) -> Any:
+    """Call ``fn(**inputs)`` in a worker, re-raising only picklable exceptions.
+
+    An exception that fails to unpickle in the parent breaks the whole
+    ``ProcessPoolExecutor``, so every later run would fail too.
+    """
+    try:
+        return fn(**inputs)
+    except Exception as exc:
+        portable = portable_exception(exc)
+        if portable is exc:
+            raise
+        raise portable from None

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from pyens.backends import LocalBackend, SequentialBackend
+from pyens.backends import LocalBackend, RemoteError, SequentialBackend
+from tests import _models
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +112,23 @@ class TestLocalBackend:
         assert isinstance(results[0], ValueError)
         assert results[1] == 5
         assert isinstance(results[2], ValueError)
+
+    def test_unpicklable_exception_does_not_break_pool(self):
+        """An exception that cannot be unpickled must not break later runs."""
+        runs = [{"x": 0}, {"x": 1}, {"x": 2}, {"x": 3}]
+        results = LocalBackend(n_workers=1).map(_models.kw_only_crash, runs)
+        assert results[0] == 0
+        assert results[2:] == [2, 3]
+        err = results[1]
+        assert isinstance(err, RemoteError)
+        assert err.type_name == "tests._models.KwOnlyError"
+        assert err.attributes == {"returncode": 1, "stderr": "missing param"}
+        assert "sipnet exited 1" in err.traceback
+
+    def test_picklable_exception_keeps_type_and_remote_traceback(self):
+        results = self.backend.map(_sometimes_fails, [{"x": -1, "y": 0}])
+        assert type(results[0]) is ValueError
+        assert "_sometimes_fails" in str(results[0].__cause__)
 
     def test_default_workers(self):
         """LocalBackend(n_workers=None) should work without error."""

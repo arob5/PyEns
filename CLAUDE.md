@@ -8,7 +8,7 @@ The project fills a specific gap: no existing tool provides a clean, **programma
 
 ## What this project is NOT
 
-- **Not an execution framework.** Execution is delegated to pluggable backends (local multiprocessing, Parsl for HPC). pyens specifies *what* to run, not *how*.
+- **Not an execution framework.** Execution is delegated to pluggable backends (local multiprocessing, Grid Engine array jobs for HPC). pyens specifies *what* to run, not *how*.
 - **Not a config management tool.** That's Hydra. pyens focuses on the combinatorial structure of ensemble inputs.
 - **Not a probabilistic inference library.** That's [ProbPipe](https://github.com/TARPS-group/prob-pipe). pyens is a complementary tool — ProbPipe generates parameter samples, pyens executes the model at those samples efficiently.
 - **Not model-specific.** The first concrete use case is SIPNET via [pySIPNET](https://github.com/TARPS-group/pySIPNET), but the design is intentionally generic.
@@ -78,14 +78,13 @@ spec = EnsembleSpec.from_runs(
 # Development: local multiprocessing
 runner = EnsembleRunner(my_model, backend=LocalBackend(n_workers=8))
 
-# Production: BU SCC via Parsl + SGE
-runner = EnsembleRunner(my_model, backend=ParslBackend(
-    provider="SGE",
-    nodes_per_block=1,
-    walltime="08:00:00",
-    scheduler_options="#$ -pe omp 4 -l mem_total=16G",
-    worker_init="module load python/3.11; source activate myenv",
-    max_blocks=20,
+# Production: BU SCC via Grid Engine array jobs (one qsub per map call)
+runner = EnsembleRunner(my_model, backend=GridEngineBackend(
+    walltime="01:00:00",
+    work_dir="/projectnb/mygroup/me/pyens_batches",
+    n_jobs=100,
+    directives=["-P mygroup"],
+    setup=["export OMP_NUM_THREADS=1"],
 ))
 ```
 
@@ -129,8 +128,13 @@ pyens/
 │   └── backends/
 │       ├── __init__.py
 │       ├── base.py          # Backend abstract base class
+│       ├── errors.py        # RemoteError, TaskFailedError, GridEngineError
+│       ├── sequential.py    # SequentialBackend
 │       ├── local.py         # LocalBackend (concurrent.futures)
-│       └── parsl.py         # ParslBackend (HPC via SGE/SLURM via Parsl)
+│       ├── gridengine.py    # GridEngineBackend (qsub array jobs)
+│       ├── _batch.py        # batch directory layout (driver <-> tasks)
+│       ├── _chunk.py        # chunk runner and framed result records
+│       └── _gridengine_worker.py  # `python -m` entry point for array tasks
 ├── tests/
 │   ├── conftest.py
 │   ├── test_axis.py
@@ -150,7 +154,7 @@ The `pyens/` core (axis, fields, spec) has **zero dependencies** and can be test
 
 ## Target HPC Environment
 
-Primary deployment: **Boston University SCC**, which runs **SGE (Sun Grid Engine)**. The `ParslBackend` wraps Parsl's `GridEngineProvider`. Parsl's pilot-job model (provision a block of SGE resources, then schedule many tasks within it) efficiently handles large ensembles without per-task job-submission overhead.
+Primary deployment: **Boston University SCC**, which runs **Grid Engine (OGS/GE 2011.11)**. `GridEngineBackend` submits one array job per `map` call and exchanges inputs and results through a batch directory on `/projectnb`. A Parsl-based backend with persistent pilot jobs, for many-iteration workloads, is deferred (issue #5).
 
 ## Open Questions (to resolve in future sessions)
 
@@ -171,7 +175,7 @@ Primary deployment: **Boston University SCC**, which runs **SGE (Sun Grid Engine
 - **Python ≥ 3.11**
 - **Pydantic v2** for any validated data models (not currently used in core)
 - **xarray** for the result layer (optional dependency)
-- **Parsl** for HPC backend (optional dependency; `pip install pyens[parsl]`)
+- **Grid Engine** HPC backend uses only the standard library; **Parsl** (`pyens[parsl]`) is reserved for a future persistent-worker backend
 - Tests must run without HPC — `LocalBackend` is always available.
 - No comments unless the WHY is non-obvious.
 - Type hints everywhere, `from __future__ import annotations` in every file.

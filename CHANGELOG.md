@@ -19,6 +19,31 @@ All user-visible API changes are documented here.
 
 ### New features
 
+- **`GridEngineBackend`** — runs each `map` call as one Grid Engine array job
+  (`qsub -t 1-K`), for Grid Engine clusters. No extra dependencies.
+  - Split the runs with `n_jobs=K` or `runs_per_job=R`; `slots=N` requests
+    `-pe <parallel_env> N` and runs each task's chunk in `N` processes;
+    `max_concurrent` maps to `-tc`; `walltime` (required) maps to `-l h_rt`.
+  - Group- and site-specific settings go in `directives` (raw `qsub` options)
+    and `setup` (shell lines run before each task). Options the backend sets
+    itself are rejected.
+  - Results are exchanged through a batch directory on a shared filesystem.
+    Tasks append each run's result as it finishes, so a task killed partway
+    keeps its finished runs.
+  - Failures are returned in place: runs lost because their task died, went
+    into `Eqw`, hit the backend `timeout`, or could not start get a
+    `TaskFailedError` with `kind`, `reason`, `task_id`, `job_id` and
+    `log_path`. A failed submission raises `GridEngineError`.
+  - `Ctrl-C`, `SIGTERM` and `SIGHUP` delete the job with `qdel` and keep the
+    batch directory.
+  - Progress is logged on the `pyens.backends.gridengine` logger.
+- **`RemoteError`** — returned in place of a model exception that cannot be
+  sent back from a worker process intact. Carries `type_name`, `message`,
+  `traceback` and picklable `attributes`.
+- **`TaskFailedError`** and **`GridEngineError`**, exported from
+  `pyens.backends` (and `RemoteError`, `TaskFailedError` and
+  `GridEngineBackend` also from `pyens`).
+
 - **`EnsembleSpec.dump(path)` / `EnsembleSpec.load(path)`** and
   **`PartialSpec.dump(path)` / `PartialSpec.load(path)`** — convenience methods
   for writing and reading specs without importing from `pyens.serialize` directly.
@@ -43,8 +68,23 @@ All user-visible API changes are documented here.
   - `PartialSpec` serializes with `"FreeField"` placeholders and a `free_fields`
     list; `load_spec` returns a `PartialSpec` in this case.
 
+### Bug fixes
+
+- **`LocalBackend` no longer breaks when a model raises an exception that cannot
+  be unpickled.** Previously, an exception class whose `__init__` requires
+  keyword-only arguments (such as pySIPNET's `SIPNETRunError`) broke the whole
+  process pool: that run and every later one came back as `BrokenProcessPool`.
+  Such exceptions are now returned as a `RemoteError` carrying the original type
+  name, message, traceback text and picklable attributes, and the other runs are
+  unaffected. Exceptions that do unpickle keep their type, as before.
+
 ### Documentation
 
+- New user guide page: **Running on a Grid Engine Cluster** covering
+  `GridEngineBackend`: sizing tasks and walltime, environment requirements,
+  failure handling, where to run the driver, and troubleshooting.
+- **Running an Ensemble** introduces `GridEngineBackend`, `RemoteError` and
+  `TaskFailedError`.
 - New user guide page: **Reproducibility and Serialization** covering `dump_spec`,
   `load_spec`, value encoding rules, custom codecs, `PartialSpec` serialization,
   and a recommended workflow for production ensemble runs.
