@@ -36,6 +36,7 @@ from typing import Any
 
 from pyens.backends import GridEngineBackend, RemoteError, TaskFailedError
 from pyens.backends._batch import BatchDir
+from pyens.backends import gridengine
 from pyens.backends.gridengine import parse_qstat_xml
 from tests import _models
 
@@ -93,13 +94,26 @@ class Watcher(threading.Thread):
             self.stop.wait(5)
 
 
-def check_s1(backend: GridEngineBackend) -> list[str]:
-    backend = dataclasses.replace(backend, n_jobs=3, walltime="00:05:00")
+MODULE_PROBE = ("type module >/dev/null 2>&1 && echo PYENS_MODULE_AVAILABLE "
+                "|| echo PYENS_MODULE_MISSING")
+
+
+def check_s1(backend: GridEngineBackend, out_dir: Path) -> list[str]:
+    backend = dataclasses.replace(backend, n_jobs=3, walltime="00:05:00",
+                                  setup=(*backend.setup, MODULE_PROBE))
     runs = [{"x": i, "y": 1000, "delay": 0.1} for i in range(30)]
     results = backend.map(_models.slow_add, runs)
     problems = []
     if results != [1000 + i for i in range(30)]:
         problems.append(f"unexpected results: {results!r}")
+    [batch] = sorted(backend_work_dir(backend).glob("pyenstest-*"))
+    log = (batch / "logs" / "task-1.log").read_text()
+    print(f"  task 1 log:\n    " + "\n    ".join(log.splitlines()))
+    detail = (out_dir / "qstat_j.txt")
+    if detail.exists():
+        lines = [ln for ln in detail.read_text().splitlines()
+                 if "resource_list" in ln or ln.startswith("project")]
+        print("  qstat -j: " + " | ".join(ln.strip() for ln in lines))
     return problems
 
 
@@ -135,10 +149,15 @@ def check_s3(backend: GridEngineBackend, watcher: Watcher) -> list[str]:
     backend = dataclasses.replace(backend, n_jobs=3, walltime="00:05:00")
     runs = [{"x": i, "y": 0, "delay": 120.0} for i in range(3)]
 
+    observed: dict[str, Any] = {}
+
     def interrupt_once_running() -> None:
         while not any("r" in s for sample in watcher.samples for s in sample.values()):
             time.sleep(2)
-        time.sleep(10)
+        # Delete one task by range first: checks the `qdel <id> -t <n>` form.
+        gridengine._SCHEDULER.cancel(watcher.job_id, [3])
+        time.sleep(15)
+        observed["after_task_qdel"] = watcher.samples[-1] if watcher.samples else {}
         os.kill(os.getpid(), signal.SIGINT)
 
     threading.Thread(target=interrupt_once_running, daemon=True).start()
@@ -149,8 +168,15 @@ def check_s3(backend: GridEngineBackend, watcher: Watcher) -> list[str]:
     else:
         return ["map returned instead of raising KeyboardInterrupt"]
     time.sleep(15)
+    problems = []
+    after = observed.get("after_task_qdel", {})
+    print(f"  states after `qdel -t 3`: {after}")
+    if 3 in after or not ({1, 2} & after.keys()):
+        problems.append(f"qdel -t 3 did not delete only task 3: {after}")
     left = [j for j in _job_ids_in(backend_work_dir(backend)) if j in _qstat_jobs()]
-    return [f"jobs still queued after interrupt: {left}"] if left else []
+    if left:
+        problems.append(f"jobs still queued after interrupt: {left}")
+    return problems
 
 
 def check_s4(backend: GridEngineBackend, watcher: Watcher) -> list[str]:
@@ -226,7 +252,7 @@ def main() -> int:
     problems: list[str] = []
     try:
         if args.check == "s1":
-            problems = check_s1(backend)
+            problems = check_s1(backend, out_dir)
         elif args.check == "s2":
             problems = check_s2(backend)
         elif args.check == "s3":

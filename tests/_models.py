@@ -114,3 +114,9 @@ def host_pid(x: int, delay: float) -> tuple[int, str, int]:
     """Sleep, then report which host and process ran the run."""
     time.sleep(delay)
     return x, os.uname().nodename, os.getpid()
+
+
+def exits_at(x: int, at: int) -> int:
+    if x == at:
+        raise SystemExit(4)
+    return x

@@ -163,7 +163,11 @@ class BatchDir:
             return pickle.load(f)
 
     def finished_tasks(self) -> set[int]:
-        """Task numbers that have a final result file or an error file."""
+        """Task numbers that have a final result file or an error file.
+
+        Raises:
+            OSError: If the results directory exists but cannot be listed.
+        """
         done: set[int] = set()
         try:
             names = os.listdir(self.results_dir)
@@ -177,6 +181,20 @@ class BatchDir:
                 except ValueError:
                     continue
         return done
+
+    def read_result_bytes(self, task: int) -> bytes:
+        """Return the task's result file, final or partial; empty if neither.
+
+        A running task can rename its partial file to the final name at any
+        moment, so the final name is tried again if the partial one vanishes.
+        """
+        for path in (self.result_path(task), self.partial_path(task),
+                     self.result_path(task)):
+            try:
+                return path.read_bytes()
+            except FileNotFoundError:
+                continue
+        return b""
 
     def remove(self) -> None:
         """Delete the batch directory, but only if it carries the marker."""

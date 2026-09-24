@@ -221,12 +221,23 @@ polling, and collecting results. You have two options:
   CPU, but pickling large ensembles and your algorithm's own computation
   may not be appropriate on a shared login node.
 
-If the driver receives `Ctrl-C`, `SIGTERM` (for example because its own batch job
-reached its walltime) or `SIGHUP` (an SSH session closing), PyEns deletes the
-array job with `qdel`, keeps the batch directory, and re-raises the
-exception. If the driver is killed outright (`SIGKILL`), its tasks keep
-running until they finish or reach their walltime. The submission message
-logged at `INFO` level includes the `qdel` command to cancel them.
+If the driver receives `Ctrl-C`, `SIGTERM`, `SIGHUP` (an SSH session
+closing), `SIGUSR1` or `SIGUSR2`, PyEns deletes the array job with `qdel`,
+keeps the batch directory, and re-raises the exception.
+
+Grid Engine kills a job that reaches its `h_rt` limit, or is deleted with
+`qdel`, with `SIGKILL`, which no program can intercept. When the driver
+itself runs as a batch job, give it a warning first so it can clean up:
+
+- submit the driver with `-notify`, so Grid Engine sends `SIGUSR2` shortly
+  before killing it, or
+- request a soft limit a little below the hard one, for example
+  `-l h_rt=48:00:00,s_rt=47:50:00`, so it receives `SIGUSR1` ten minutes
+  early.
+
+If the driver is killed without warning, its array tasks keep running until
+they finish or reach their own walltime. The submission message logged at
+`INFO` level includes the `qdel` command to cancel them.
 
 ---
 

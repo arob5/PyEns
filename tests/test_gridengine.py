@@ -19,11 +19,13 @@ from pyens.backends import (
 from pyens.backends import gridengine
 from pyens.backends._batch import BatchDir
 from pyens.backends.gridengine import (
+    _signals_ignored,
     _signals_raise_system_exit,
     parse_qacct,
     parse_qstat_xml,
     parse_submit_output,
     parse_task_ids,
+    task_ranges,
 )
 from tests import _models
 
@@ -69,7 +71,7 @@ class TestConfiguration:
         backend = GridEngineBackend(walltime=value, work_dir=tmp_path, n_jobs=1)
         assert backend.walltime == expected
 
-    @pytest.mark.parametrize("value", ["1h", "00:60:00", "", 0, "1:2:3"])
+    @pytest.mark.parametrize("value", ["1h", "00:60:00", "", 0, "1:2:3", "00:00:00"])
     def test_walltime_invalid(self, tmp_path, value):
         with pytest.raises(ValueError, match="walltime"):
             GridEngineBackend(walltime=value, work_dir=tmp_path, n_jobs=1)
@@ -112,6 +114,7 @@ class TestConfiguration:
 
     @pytest.mark.parametrize("overrides", [
         {"poll_interval": 0}, {"timeout": 0}, {"missing_grace": -1},
+        {"missing_grace": float("nan")}, {"poll_interval": float("nan")},
         {"keep_batch_dir": "sometimes"},
     ])
     def test_other_invalid_values(self, tmp_path, overrides):
@@ -220,6 +223,15 @@ class TestParsers:
             1: "r", 2: "Eqw", 3: "qw", 5: "qw", 7: "qw",
         }
 
+    def test_qstat_tolerates_control_characters(self):
+        xml = _QSTAT_XML.replace("<JB_job_number>999", "<JB_name>bad\x01name</JB_name>"
+                                 "<JB_job_number>999")
+        assert parse_qstat_xml(xml, "555")[1] == "r"
+
+    def test_task_ranges(self):
+        assert task_ranges([7, 1, 2, 3, 5, 3]) == ["1-3", "5", "7"]
+        assert task_ranges([]) == []
+
     def test_qstat_empty_and_invalid(self):
         assert parse_qstat_xml("<job_info><queue_info/><job_info/></job_info>", "1") == {}
         assert parse_qstat_xml("error: not xml", "1") is None
@@ -313,6 +325,25 @@ class TestPreSubmissionErrors:
         assert fake_ge.calls() == []
         assert fake_ge.batch_dirs() == []
 
+    def test_too_many_tasks_rejected_before_writing(self, fake_ge):
+        backend = _backend(fake_ge, n_jobs=None, runs_per_job=1)
+        with pytest.raises(ValueError, match="max_aj_tasks"):
+            backend.map(_models.add, [{"x": 1, "y": 1}] * 75_001)
+        assert fake_ge.batch_dirs() == []
+
+    def test_qsub_timeout_keeps_batch(self, fake_ge, monkeypatch):
+        real_run = gridengine._run
+
+        def slow_qsub(cmd):
+            if cmd[0] == "qsub":
+                raise gridengine.subprocess.TimeoutExpired(cmd, 120)
+            return real_run(cmd)
+
+        monkeypatch.setattr(gridengine, "_run", slow_qsub)
+        with pytest.raises(GridEngineError, match="may have been submitted"):
+            _backend(fake_ge).map(_models.add, [{"x": 1, "y": 1}])
+        assert len(fake_ge.batch_dirs()) == 1
+
     def test_qsub_failure_raises(self, fake_ge):
         fake_ge.set_faults(qsub_fail="project dietzelab does not exist")
         with pytest.raises(GridEngineError, match="does not exist"):
@@ -339,6 +370,32 @@ class TestTaskFailures:
             assert "h_rt=00:05:00" in err.reason
             assert f"{len(done)} of 4 runs" in err.reason
             assert err.log_path.endswith("logs/task-1.log")
+
+    def test_dead_task_deleted_as_safety_net(self, fake_ge):
+        fake_ge.set_faults(kill_after={"1": 0.3})
+        runs = [{"x": i, "y": 0, "delay": 1.0} for i in range(2)]
+        results = _backend(fake_ge, n_jobs=2).map(_models.slow_add, runs)
+        assert isinstance(results[0], TaskFailedError) and results[1] == 1
+        assert ["qdel", "1000", "-t", "1"] in fake_ge.calls("qdel")
+
+    def test_model_calling_sys_exit_fails_only_its_run(self, fake_ge):
+        results = _backend(fake_ge, n_jobs=1).map(
+            _models.exits_at, [{"x": i, "at": 1} for i in range(3)])
+        assert results[0] == 0 and results[2] == 2
+        assert isinstance(results[1], SystemExit)
+
+    def test_listing_error_tolerated(self, fake_ge, monkeypatch):
+        real = BatchDir.finished_tasks
+        calls = []
+
+        def flaky(self):
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError("stale file handle")
+            return real(self)
+
+        monkeypatch.setattr(BatchDir, "finished_tasks", flaky)
+        assert _backend(fake_ge).map(_models.add, [{"x": 1, "y": 1}]) == [2]
 
     def test_worker_process_exit(self, fake_ge):
         backend = _backend(fake_ge, n_jobs=2)
@@ -421,6 +478,20 @@ class TestInterruption:
                     pass
         assert info.value.code == 128 + signal.SIGTERM
         assert signal.getsignal(signal.SIGTERM) == before
+
+    def test_sigusr2_becomes_system_exit(self):
+        with pytest.raises(SystemExit) as info:
+            with _signals_raise_system_exit():
+                os.kill(os.getpid(), signal.SIGUSR2)
+                for _ in range(1000):
+                    pass
+        assert info.value.code == 128 + signal.SIGUSR2
+
+    def test_signals_ignored_while_deleting(self):
+        with _signals_ignored():
+            os.kill(os.getpid(), signal.SIGTERM)
+            os.kill(os.getpid(), signal.SIGINT)
+        assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
     def test_ignored_signal_left_alone(self):
         previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)

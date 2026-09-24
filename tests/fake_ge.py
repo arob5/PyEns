@@ -245,7 +245,9 @@ def qdel(args: list[str]) -> int:
         return 1
     job = json.loads((jd / "job.json").read_text())
     if "-t" in args:
-        tasks = [int(t) for t in args[args.index("-t") + 1].split(",")]
+        # Like real Grid Engine, -t takes a single n[-m] range.
+        first, _, last = args[args.index("-t") + 1].partition("-")
+        tasks = list(range(int(first), int(last or first) + 1))
     else:
         tasks = list(range(1, job["n_tasks"] + 1))
     for t in tasks:

@@ -168,9 +168,11 @@ class GridEngineError(RuntimeError):
     """A Grid Engine command failed in a way that prevents running the ensemble.
 
     Raised by :class:`~pyens.backends.GridEngineBackend` when submission
-    fails (for example ``qsub`` rejects a directive). Nothing is left
-    running when this is raised. Failures of individual runs or tasks are
-    never raised; they are returned in the result slots.
+    fails (for example ``qsub`` rejects a directive), in which case nothing
+    is running. The one exception is a ``qsub`` that does not return in
+    time: the job may have been queued anyway, so the message says to check
+    ``qstat`` and the batch directory is kept. Failures of individual runs
+    or tasks are never raised; they are returned in the result slots.
     """
 
 

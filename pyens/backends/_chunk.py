@@ -82,8 +82,11 @@ def encode_failure(index: int, exc: BaseException, traceback: str | None = None)
 
 
 def capture_call(fn: Callable[..., Any], index: int, inputs: dict[str, Any]) -> bytes:
-    """Call ``fn(**inputs)`` and encode the outcome as a record. Never raises
-    for exceptions derived from :class:`Exception`.
+    """Call ``fn(**inputs)`` and encode the outcome as a record.
+
+    Exceptions derived from :class:`Exception`, and :class:`SystemExit` (a
+    model calling ``sys.exit``), are recorded as the run's failure instead
+    of ending the task.
 
     Args:
         fn: The model callable.
@@ -95,7 +98,7 @@ def capture_call(fn: Callable[..., Any], index: int, inputs: dict[str, Any]) -> 
     """
     try:
         value = fn(**inputs)
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         return encode_failure(index, exc)
     return encode_success(index, value)
 
@@ -137,17 +140,17 @@ def write_frame(stream: BinaryIO, record: bytes) -> None:
     stream.flush()
 
 
-def read_frames(path: str | os.PathLike[str]) -> tuple[list[bytes], bool]:
-    """Read every complete frame from *path*.
+def read_frames(source: str | os.PathLike[str] | bytes) -> tuple[list[bytes], bool]:
+    """Read every complete frame from a file, or from its contents.
 
     Args:
-        path: A file written with :func:`write_frame`.
+        source: A file written with :func:`write_frame`, or its bytes.
 
     Returns:
         ``(frames, complete)``: the frames in file order, and ``False`` if the
-        file ended in the middle of a frame (the writer died mid-write).
+        data ended in the middle of a frame (the writer died mid-write).
     """
-    data = Path(path).read_bytes()
+    data = source if isinstance(source, bytes) else Path(source).read_bytes()
     frames: list[bytes] = []
     pos = 0
     while pos < len(data):

@@ -6,7 +6,9 @@ import contextlib
 import functools
 import getpass
 import logging
+import math
 import os
+import pwd
 import re
 import shlex
 import signal
@@ -41,6 +43,11 @@ _OWNED_OPTIONS = frozenset({
 _JOB_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 _WALLTIME = re.compile(r"^(\d+):([0-5]\d):([0-5]\d)$")
 _COMMAND_TIMEOUT = 120.0
+# Grid Engine's default max_aj_tasks; qsub rejects larger arrays.
+_MAX_TASKS = 75_000
+_MANY_TASKS = 10_000
+_QSTAT_REWARN = 600.0
+_NOTIFY_SIGNALS = ("SIGTERM", "SIGHUP", "SIGUSR1", "SIGUSR2")
 
 _sleep = time.sleep
 _MISSING = object()
@@ -91,9 +98,14 @@ class GridEngineBackend(Backend):
       finished before it stopped keep their results.
 
     A failed submission raises :class:`~pyens.backends.GridEngineError`.
-    On ``KeyboardInterrupt``, ``SIGTERM`` or ``SIGHUP`` (for example when an
-    SSH session drops), the job is deleted with ``qdel``, the batch
-    directory is kept, and the exception propagates.
+    On ``KeyboardInterrupt``, ``SIGTERM``, ``SIGHUP`` (for example when an
+    SSH session drops), or ``SIGUSR1``/``SIGUSR2`` (Grid Engine's warnings
+    to a driver that itself runs as a batch job submitted with ``-notify``
+    or a soft ``s_rt`` limit), the job is deleted with ``qdel``, the batch
+    directory is kept, and the exception propagates. A driver killed with
+    ``SIGKILL`` (Grid Engine's ``h_rt`` limit or ``qdel`` without
+    ``-notify``) cannot clean up: its tasks run until they finish or reach
+    their own ``walltime``.
 
     Progress is reported through :mod:`logging` on the
     ``pyens.backends.gridengine`` logger at ``INFO`` level.
@@ -226,8 +238,8 @@ class GridEngineBackend(Backend):
             raise ValueError("poll_interval must be positive")
         if self.timeout is not None and not self.timeout > 0:
             raise ValueError("timeout must be positive or None")
-        if self.missing_grace < 0:
-            raise ValueError("missing_grace must be non-negative")
+        if not (self.missing_grace >= 0 and math.isfinite(self.missing_grace)):
+            raise ValueError("missing_grace must be a non-negative number of seconds")
         if self.keep_batch_dir not in ("always", "on_failure", "never"):
             raise ValueError(
                 f"keep_batch_dir must be 'always', 'on_failure' or 'never', "
@@ -259,7 +271,9 @@ class GridEngineBackend(Backend):
             :class:`~pyens.backends.TaskFailedError`.
 
         Raises:
-            ValueError: If *fn* is defined in ``__main__``.
+            ValueError: If *fn* is defined in ``__main__``, or the runs would
+                need more than 75,000 array tasks (Grid Engine's default
+                ``max_aj_tasks``).
             GridEngineError: If the job could not be submitted.
             pickle.PicklingError: (or ``TypeError``/``AttributeError``) if
                 *fn* or an input cannot be pickled. Raised before submission.
@@ -273,6 +287,17 @@ class GridEngineBackend(Backend):
             ranges = split_evenly(n, self.n_jobs)
         else:
             ranges = split_evenly(n, -(-n // self.runs_per_job))  # type: ignore[operator]
+        if len(ranges) > _MAX_TASKS:
+            raise ValueError(
+                f"{len(ranges)} array tasks exceed Grid Engine's default limit of "
+                f"{_MAX_TASKS} (max_aj_tasks); use a smaller n_jobs or a larger "
+                f"runs_per_job"
+            )
+        if len(ranges) > _MANY_TASKS:
+            logger.warning(
+                "%d array tasks: each writes its own input, result and log file; "
+                "consider fewer, larger tasks", len(ranges),
+            )
 
         batch = BatchDir.create(self.work_dir, self.job_name)
         try:
@@ -282,35 +307,32 @@ class GridEngineBackend(Backend):
             raise
         try:
             job_id = _SCHEDULER.submit(batch.script_path)
+        except _SubmissionUncertain:
+            self._warn_possible_orphan(batch)
+            raise
         except Exception:
             batch.remove()
             raise
         except BaseException:
-            # qsub may have queued the job before the interrupt arrived.
-            # Removing the directory would leave its tasks unable to start
-            # and stuck in an error state, so keep it and let them run.
-            logger.warning(
-                "Interrupted during qsub; a job named %s may have been submitted. "
-                "Check `qstat -u $USER`. Batch directory kept: %s",
-                self.job_name, batch.root,
-            )
+            self._warn_possible_orphan(batch)
             raise
 
         try:
-            batch.job_id_path.write_text(job_id + "\n")
-            logger.info(
-                "Submitted Grid Engine job %s: %d runs in %d tasks. Batch directory: "
-                "%s. To cancel: qdel %s",
-                job_id, n, len(ranges), batch.root, job_id,
-            )
             with _signals_raise_system_exit():
+                batch.job_id_path.write_text(job_id + "\n")
+                logger.info(
+                    "Submitted Grid Engine job %s: %d runs in %d tasks. Batch "
+                    "directory: %s. To cancel: qdel %s",
+                    job_id, n, len(ranges), batch.root, job_id,
+                )
                 failed = self._wait(batch, job_id, len(ranges))
         except BaseException:
-            logger.warning(
-                "Interrupted; deleting Grid Engine job %s. Batch directory kept: %s",
-                job_id, batch.root,
-            )
-            _SCHEDULER.cancel(job_id)
+            with _signals_ignored():
+                logger.warning(
+                    "Interrupted; deleting Grid Engine job %s. Batch directory "
+                    "kept: %s", job_id, batch.root,
+                )
+                _SCHEDULER.cancel(job_id)
             raise
 
         results = self._collect(batch, job_id, ranges, failed, n)
@@ -328,6 +350,16 @@ class GridEngineBackend(Backend):
     # ------------------------------------------------------------------
     # Steps of map()
     # ------------------------------------------------------------------
+
+    def _warn_possible_orphan(self, batch: BatchDir) -> None:
+        # qsub may have queued the job before failing to report it. Removing
+        # the directory would leave its tasks unable to start and stuck in
+        # an error state, so keep it and let them run.
+        logger.warning(
+            "qsub did not complete; a job named %s may have been submitted anyway. "
+            "Check `qstat -u $USER`. Batch directory kept: %s",
+            self.job_name, batch.root,
+        )
 
     def _write_batch(
         self,
@@ -420,10 +452,16 @@ class GridEngineBackend(Backend):
         grace = max(self.missing_grace, 2 * self.poll_interval)
         deadline = None if self.timeout is None else time.monotonic() + self.timeout
         last_report: tuple[int, ...] | None = None
-        qstat_down = False
+        qstat_down_since: float | None = None
+        qstat_warned_at = 0.0
 
         while True:
-            finished = batch.finished_tasks()
+            try:
+                finished = batch.finished_tasks()
+            except OSError as exc:
+                logger.warning("Could not list %s (%s); retrying", batch.results_dir, exc)
+                _sleep(self.poll_interval)
+                continue
             outstanding = all_tasks - finished - failed.keys()
             if not outstanding:
                 return failed
@@ -431,7 +469,8 @@ class GridEngineBackend(Backend):
             if deadline is not None and now >= deadline:
                 _SCHEDULER.cancel(job_id)
                 # A task may have finished while the job was being deleted.
-                outstanding -= batch.finished_tasks()
+                with contextlib.suppress(OSError):
+                    outstanding -= batch.finished_tasks()
                 for task in outstanding:
                     failed[task] = (
                         "timeout",
@@ -445,17 +484,27 @@ class GridEngineBackend(Backend):
             states = _SCHEDULER.status(job_id)
             running = pending = 0
             if states is None:
-                if not qstat_down:
-                    logger.warning("qstat failed; relying on result files until it recovers")
-                qstat_down = True
+                if qstat_down_since is None:
+                    qstat_down_since = now
+                if now - qstat_warned_at >= _QSTAT_REWARN:
+                    logger.warning(
+                        "qstat has been failing for %.0f s; finished tasks are still "
+                        "collected, but tasks that die cannot be detected until it "
+                        "recovers (set timeout= to bound the wait)",
+                        now - qstat_down_since,
+                    )
+                    qstat_warned_at = now
             else:
-                qstat_down = False
+                qstat_down_since = None
+                qstat_warned_at = 0.0
                 in_error = []
+                dead = []
                 for task in sorted(outstanding):
                     state = states.get(task)
                     if state is None:
                         first_absent = absent_since.setdefault(task, now)
                         if now - first_absent >= grace:
+                            dead.append(task)
                             failed[task] = (
                                 "died",
                                 "the task left the queue without writing its final "
@@ -478,6 +527,10 @@ class GridEngineBackend(Backend):
                             f"deleted{': ' + detail if detail else ''}",
                         )
                     _SCHEDULER.cancel(job_id, in_error)
+                if dead:
+                    # Normally a no-op; guards against a task that is still
+                    # alive but missing from qstat's output.
+                    _SCHEDULER.cancel(job_id, dead, quiet=True)
 
             report = (len(finished), running, pending, len(failed))
             if report != last_report:
@@ -500,19 +553,23 @@ class GridEngineBackend(Backend):
         accounting: dict[int, dict[str, str]] | None = None
         for task, (start, stop) in enumerate(ranges, start=1):
             log_path = str(batch.log_path(task))
-            final = batch.result_path(task)
-            if not final.exists() and batch.error_path(task).exists():
+            if (not batch.result_path(task).exists()
+                    and batch.error_path(task).exists()):
                 err = self._worker_error(batch, job_id, task, log_path)
                 for i in range(start, stop):
                     results[i] = err
                 continue
 
-            source = final if final.exists() else batch.partial_path(task)
-            if source.exists():
-                frames, _ = read_frames(source)
-                for index, output in iter_decoded(frames):
-                    if start <= index < stop:
-                        results[index] = output
+            read_problem = ""
+            try:
+                data = batch.read_result_bytes(task)
+            except OSError as exc:
+                data = b""
+                read_problem = f"; its result file could not be read ({exc})"
+            frames, _ = read_frames(data)
+            for index, output in iter_decoded(frames):
+                if start <= index < stop:
+                    results[index] = output
             missing = [i for i in range(start, stop) if results[i] is _MISSING]
             if not missing:
                 continue
@@ -524,6 +581,7 @@ class GridEngineBackend(Backend):
                 if accounting is None:
                     accounting = _SCHEDULER.accounting(job_id)
                 reason += _describe_accounting(accounting.get(task), self.walltime)
+            reason += read_problem
             n_done = (stop - start) - len(missing)
             if n_done:
                 reason += (f"; {n_done} of {stop - start} runs in this task "
@@ -570,7 +628,7 @@ class _GridEngine:
         except FileNotFoundError as exc:
             raise GridEngineError("qsub was not found on PATH") from exc
         except subprocess.TimeoutExpired as exc:
-            raise GridEngineError(
+            raise _SubmissionUncertain(
                 f"qsub did not return within {_COMMAND_TIMEOUT:g} s; check "
                 f"`qstat -u $USER` for a job that may have been submitted anyway"
             ) from exc
@@ -586,7 +644,7 @@ class _GridEngine:
 
     def status(self, job_id: str) -> dict[int, str] | None:
         try:
-            proc = _run(["qstat", "-xml", "-g", "d", "-u", getpass.getuser()])
+            proc = _run(["qstat", "-xml", "-g", "d", "-u", _current_user()])
         except (OSError, subprocess.TimeoutExpired):
             return None
         if proc.returncode != 0:
@@ -602,18 +660,30 @@ class _GridEngine:
                    if line.lower().startswith("error reason")]
         return "; ".join(reasons)
 
-    def cancel(self, job_id: str, tasks: Sequence[int] | None = None) -> None:
-        cmd = ["qdel", job_id]
+    def cancel(
+        self, job_id: str, tasks: Sequence[int] | None = None, *, quiet: bool = False
+    ) -> None:
+        """Delete the whole job, or only *tasks*, never raising.
+
+        ``qdel -t`` takes a single range, so one command is run per
+        contiguous run of task numbers. Failures are logged at WARNING
+        level, or DEBUG with ``quiet`` (for calls that are expected to find
+        nothing left to delete).
+        """
+        commands = [["qdel", job_id]]
         if tasks:
-            cmd += ["-t", ",".join(str(t) for t in sorted(tasks))]
-        try:
-            proc = _run(cmd)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            logger.error("qdel %s failed (%s); delete the job manually", job_id, exc)
-            return
-        if proc.returncode != 0:
-            logger.debug("qdel %s exited %d: %s", job_id, proc.returncode,
-                         (proc.stderr or proc.stdout).strip())
+            commands = [["qdel", job_id, "-t", r] for r in task_ranges(tasks)]
+        for cmd in commands:
+            try:
+                proc = _run(cmd)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.error("%s failed (%s); delete the job manually",
+                             " ".join(cmd), exc)
+                continue
+            if proc.returncode != 0:
+                logger.log(logging.DEBUG if quiet else logging.WARNING,
+                           "%s exited %d: %s", " ".join(cmd), proc.returncode,
+                           (proc.stderr or proc.stdout).strip())
 
     def accounting(self, job_id: str) -> dict[int, dict[str, str]]:
         try:
@@ -625,7 +695,20 @@ class _GridEngine:
         return parse_qacct(proc.stdout)
 
 
+class _SubmissionUncertain(GridEngineError):
+    """qsub did not report back, so the job may or may not be queued."""
+
+
 _SCHEDULER = _GridEngine()
+
+
+def _current_user() -> str:
+    # Grid Engine records the owner by UID; $USER/$LOGNAME can differ (sudo,
+    # containers), which would hide every task from `qstat -u`.
+    try:
+        return pwd.getpwuid(os.getuid()).pw_name
+    except KeyError:
+        return getpass.getuser()
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
@@ -679,6 +762,29 @@ def parse_task_ids(text: str) -> list[int]:
     return ids
 
 
+def task_ranges(tasks: Iterable[int]) -> list[str]:
+    """Collapse task numbers into Grid Engine ranges, one per contiguous run.
+
+    Examples:
+        >>> task_ranges([5, 1, 2, 3, 7])
+        ['1-3', '5', '7']
+    """
+    ranges: list[str] = []
+    ordered = sorted(set(tasks))
+    i = 0
+    while i < len(ordered):
+        j = i
+        while j + 1 < len(ordered) and ordered[j + 1] == ordered[j] + 1:
+            j += 1
+        first, last = ordered[i], ordered[j]
+        ranges.append(str(first) if first == last else f"{first}-{last}")
+        i = j + 1
+    return ranges
+
+
+_XML_INVALID = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
 def parse_qstat_xml(text: str, job_id: str) -> dict[int, str] | None:
     """Map task number to state for *job_id* from ``qstat -xml`` output.
 
@@ -689,7 +795,9 @@ def parse_qstat_xml(text: str, job_id: str) -> dict[int, str] | None:
         if the XML cannot be parsed.
     """
     try:
-        root = ET.fromstring(text)
+        # Control characters (e.g. in another job's name) make the whole
+        # document invalid XML; drop them rather than lose all state.
+        root = ET.fromstring(_XML_INVALID.sub("", text))
     except ET.ParseError:
         return None
     states: dict[int, str] = {}
@@ -759,8 +867,11 @@ def _normalize_walltime(value: str | int) -> str:
         hours, rest = divmod(int(value), 3600)
         minutes, seconds = divmod(rest, 60)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-    if isinstance(value, str) and _WALLTIME.match(value.strip()):
-        return value.strip()
+    match = _WALLTIME.match(value.strip()) if isinstance(value, str) else None
+    if match:
+        if not any(int(part) for part in match.groups()):
+            raise ValueError("walltime must be at least one second")
+        return value.strip()  # type: ignore[union-attr]
     raise ValueError(f"walltime must be 'HH:MM:SS' or a number of seconds, got {value!r}")
 
 
@@ -806,7 +917,11 @@ def _reject_main_module(fn: Callable[..., Any]) -> None:
 
 @contextlib.contextmanager
 def _signals_raise_system_exit() -> Iterator[None]:
-    """Turn SIGTERM and SIGHUP into ``SystemExit`` so cleanup code runs.
+    """Turn SIGTERM, SIGHUP, SIGUSR1 and SIGUSR2 into ``SystemExit``.
+
+    Grid Engine sends SIGUSR2 (with ``-notify``) or SIGUSR1 (at a soft
+    ``s_rt`` limit) before killing a job, so a driver running as a batch
+    job gets a chance to delete its array job.
 
     Only signals whose handler is the default are changed, so an ignored
     SIGHUP (under ``nohup``) or a caller's own handler is left alone. Does
@@ -820,11 +935,29 @@ def _signals_raise_system_exit() -> Iterator[None]:
         raise SystemExit(128 + signum)
 
     previous: dict[int, Any] = {}
-    for name in ("SIGTERM", "SIGHUP"):
+    for name in _NOTIFY_SIGNALS:
         sig = getattr(signal, name, None)
         if sig is None or signal.getsignal(sig) is not signal.SIG_DFL:
             continue
         previous[sig] = signal.signal(sig, handler)
+    try:
+        yield
+    finally:
+        for sig, old in previous.items():
+            signal.signal(sig, old)
+
+
+@contextlib.contextmanager
+def _signals_ignored() -> Iterator[None]:
+    """Ignore interrupts while deleting the job, so a second one can't stop it."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous: dict[int, Any] = {}
+    for name in ("SIGINT", *_NOTIFY_SIGNALS):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            previous[sig] = signal.signal(sig, signal.SIG_IGN)
     try:
         yield
     finally:
