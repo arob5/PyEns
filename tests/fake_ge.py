@@ -229,7 +229,7 @@ def qstat(args: list[str]) -> int:
         for entry in running + pending:
             number = entry.split("<JB_job_number>")[1].split("<")[0]
             state = entry.split("<state>")[1].split("<")[0]
-            print(f"{number} 0.5 fake arober {state} 01/01/2026 00:00:00 all.q")
+            print(f"{number} 0.5 fake testuser {state} 01/01/2026 00:00:00 all.q")
         return 0
     print("<?xml version='1.0'?>\n<job_info>\n  <queue_info>\n" + "".join(running)
           + "  </queue_info>\n  <job_info>\n" + "".join(pending)
@@ -259,7 +259,7 @@ def qdel(args: list[str]) -> int:
             except (ProcessLookupError, ValueError):
                 pass
         (jd / f"task-{t}.state").unlink(missing_ok=True)
-    print(f"arober has registered the job {job_id} for deletion")
+    print(f"testuser has registered the job {job_id} for deletion")
     return 0
 
 

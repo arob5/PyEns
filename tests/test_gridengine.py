@@ -79,7 +79,7 @@ class TestConfiguration:
     @pytest.mark.parametrize("directive", [
         "-t 1-5", "-tc 3", "-o /x", "-e /x", "-N name", "-pe omp 4", "-cwd",
         "-l h_rt=01:00:00", "-l mem_per_core=4G,h_rt=1:00:00", "-sync y",
-        "P dietzelab", "", "-P a\n-P b",
+        "P myproject", "", "-P a\n-P b",
     ])
     def test_rejected_directives(self, tmp_path, directive):
         with pytest.raises(ValueError):
@@ -89,14 +89,14 @@ class TestConfiguration:
     def test_accepted_directives_stored_as_tuple(self, tmp_path):
         backend = GridEngineBackend(
             walltime=60, work_dir=tmp_path, n_jobs=1,
-            directives=["-P dietzelab", "-l buyin", "-v OMP_NUM_THREADS"],
+            directives=["-P myproject", "-l mem_free=4G", "-v OMP_NUM_THREADS"],
         )
-        assert backend.directives == ("-P dietzelab", "-l buyin", "-v OMP_NUM_THREADS")
+        assert backend.directives == ("-P myproject", "-l mem_free=4G", "-v OMP_NUM_THREADS")
 
     def test_directives_must_not_be_a_single_string(self, tmp_path):
         with pytest.raises(ValueError, match="sequences"):
             GridEngineBackend(walltime=60, work_dir=tmp_path, n_jobs=1,
-                              directives="-P dietzelab")
+                              directives="-P myproject")
 
     @pytest.mark.parametrize("name", ["1job", "a b", "a/b", ""])
     def test_invalid_job_name(self, tmp_path, name):
@@ -138,7 +138,7 @@ class TestScript:
     def test_all_options_rendered(self, tmp_path):
         backend = GridEngineBackend(
             walltime="02:00:00", work_dir=tmp_path, n_jobs=1, slots=4,
-            max_concurrent=5, directives=["-P dietzelab", "-l buyin"],
+            max_concurrent=5, directives=["-P myproject", "-l mem_free=4G"],
             setup=["module load gcc", "export OMP_NUM_THREADS=1"],
             python="/opt/my env/python", job_name="eki_iter",
         )
@@ -149,7 +149,7 @@ class TestScript:
             "#$ -N eki_iter", "#$ -t 1-7", "#$ -tc 5", "#$ -l h_rt=02:00:00",
             "#$ -pe omp 4", f"#$ -wd {os.getcwd()}", "#$ -j y",
             f"#$ -o {batch.logs_dir}/task-$TASK_ID.log",
-            "#$ -P dietzelab", "#$ -l buyin",
+            "#$ -P myproject", "#$ -l mem_free=4G",
         ]:
             assert expected in lines
         assert lines.index("module load gcc") < lines.index("export OMP_NUM_THREADS=1")
@@ -191,13 +191,13 @@ _QSTAT_XML = """<?xml version='1.0'?>
 """
 
 _QACCT = """==============================================================
-qname        buyin
+qname        all.q
 jobnumber    555
 taskid       1
 failed       0
 exit_status  0
 ==============================================================
-qname        buyin
+qname        all.q
 jobnumber    555
 taskid       2
 failed       37  : qmaster enforced h_rt, h_cpu, or h_vmem limit
@@ -345,7 +345,7 @@ class TestPreSubmissionErrors:
         assert len(fake_ge.batch_dirs()) == 1
 
     def test_qsub_failure_raises(self, fake_ge):
-        fake_ge.set_faults(qsub_fail="project dietzelab does not exist")
+        fake_ge.set_faults(qsub_fail="project myproject does not exist")
         with pytest.raises(GridEngineError, match="does not exist"):
             _backend(fake_ge).map(_models.add, [{"x": 1, "y": 1}])
         assert fake_ge.batch_dirs() == []
