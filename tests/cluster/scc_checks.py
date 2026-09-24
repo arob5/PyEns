@@ -167,15 +167,19 @@ def check_s3(backend: GridEngineBackend, watcher: Watcher) -> list[str]:
         pass
     else:
         return ["map returned instead of raising KeyboardInterrupt"]
-    time.sleep(15)
+    # Deleted tasks sit in state "dr" for up to a minute or so.
+    ours = _job_ids_in(backend_work_dir(backend))
+    deadline = time.time() + 150
+    while time.time() < deadline and any(j in _qstat_jobs() for j in ours):
+        time.sleep(10)
     problems = []
     after = observed.get("after_task_qdel", {})
     print(f"  states after `qdel -t 3`: {after}")
     if 3 in after or not ({1, 2} & after.keys()):
         problems.append(f"qdel -t 3 did not delete only task 3: {after}")
-    left = [j for j in _job_ids_in(backend_work_dir(backend)) if j in _qstat_jobs()]
+    left = [j for j in ours if j in _qstat_jobs()]
     if left:
-        problems.append(f"jobs still queued after interrupt: {left}")
+        problems.append(f"jobs still queued 150 s after interrupt: {left}")
     return problems
 
 
