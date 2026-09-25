@@ -13,6 +13,7 @@ all = ["pyens[parsl,xarray]"]
 
 [dependency-groups]
 dev = [
+    "cftime>=1.6",
     "ipykernel>=7.2.0",
     "jupyter>=1.1.1",
     "myst-parser>=5.1.0",
@@ -21,6 +22,7 @@ dev = [
     "pytest-cov>=5.0",
     "sphinx>=9.0.4",
     "sphinx-copybutton>=0.5.2",
+    "xarray>=2024.1",
 ]
 
 [build-system]

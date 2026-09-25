@@ -654,3 +654,6 @@ input combinations and retrieves values by coordinate.
 *Lazy enumeration.* PyEns never materialises the full list of inputs in memory.
 `iter_runs()` is a generator that produces one `(inputs, coordinate)` pair at a
 time.
+
+To build fields directly from an xarray `Dataset`, following this mapping, see
+[Building Fields from xarray](xarray.md).

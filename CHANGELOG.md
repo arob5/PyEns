@@ -19,6 +19,26 @@ All user-visible API changes are documented here.
 
 ### New features
 
+- **`pyens.xarray`** — builds fields from xarray objects, so a `Dataset` of
+  inputs becomes an `EnsembleSpec` without hand-written translation. Optional:
+  `pip install pyens[xarray]`; the core still has no dependencies.
+  - `axes_of(obj)` — one `Axis` per dim: `labels=` the coordinate values as
+    plain Python values, or `size=` for a dim without a coordinate. Date and
+    time labels become ISO 8601 strings. Duplicate labels are refused.
+  - `fields_from_dataset(dataset)` — one field per data variable, each along
+    its own dims, with one shared `Axis` per dim, so variables that share a
+    dim zip on it. `field_from_dataarray(array)` does the same for one
+    `DataArray`. Values are plain Python values from `.tolist()`, and a 0-d
+    variable becomes `Fixed`.
+  - `along=` makes only the named dims ensemble axes. Each run's value is then
+    a `DataArray` slice that keeps the other dims, such as a site's time
+    series.
+  - `dataset_as_field(dataset, along=...)` — one field whose value for each
+    run is a sub-`Dataset`.
+  - `axes=` uses `Axis` objects you already have, matched to dims by label,
+    with the data reordered to the `Axis`'s label order.
+  - New user guide page: *Building Fields from xarray*.
+
 - **`GridEngineBackend`** — runs each `map` call as one Grid Engine array job
   (`qsub -t 1-K`), for Grid Engine clusters. No extra dependencies.
   - Split the runs with `n_jobs=K` or `runs_per_job=R`; `slots=N` requests

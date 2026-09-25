@@ -120,3 +120,8 @@ def exits_at(x: int, at: int) -> int:
     if x == at:
         raise SystemExit(4)
     return x
+
+
+def site_series_total(series: Any, scale: float) -> tuple[Any, float]:
+    """Return a DataArray slice's ``site`` label and its scaled sum."""
+    return series["site"].item(), float(series.sum()) * scale
