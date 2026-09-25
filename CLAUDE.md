@@ -125,6 +125,7 @@ pyens/
 │   ├── spec.py              # EnsembleSpec, PartialSpec
 │   ├── result.py            # EnsembleResult — structured output with coordinates
 │   ├── runner.py            # EnsembleRunner — ties spec + model + backend
+│   ├── xarray.py            # fields from xarray objects (optional: pyens[xarray])
 │   └── backends/
 │       ├── __init__.py
 │       ├── base.py          # Backend abstract base class

@@ -113,6 +113,50 @@ is suitable for committing alongside results in version control.
 
 ---
 
+## From xarray
+
+If your inputs are already in an xarray `Dataset`, `pyens.xarray` builds the
+fields for you (`pip install pyens[xarray]`). Each dim becomes an `Axis` whose
+labels are the dim's coordinate values, or the positions `0, 1, …` when it has
+no coordinate. Each data variable becomes a `Grid` along its own dims.
+Variables that share a dim share its axis, so they zip on it, just as xarray
+aligns them:
+
+```python
+import xarray as xr
+from pyens import EnsembleSpec
+from pyens.xarray import dataset_as_field, fields_from_dataset
+
+# Parameters over (member, site); soil depth over site only.
+table = xr.Dataset(
+    {
+        "leaf_area":  (("member", "site"), [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
+        "soil_depth": ("site", [0.5, 0.8]),
+    },
+    coords={"site": ["harvard_forest", "niwot_ridge"]},
+)
+
+# Forcing over (site, time): each run gets its site's whole time series.
+forcing = xr.Dataset(
+    {"tair": (("site", "time"), [[280.0, 281.0, 282.0], [270.0, 271.0, 272.0]])},
+    coords={"site": ["harvard_forest", "niwot_ridge"]},
+)
+
+spec = EnsembleSpec(inputs={
+    **fields_from_dataset(table),                          # leaf_area, soil_depth
+    "climate": dataset_as_field(forcing, along="site"),    # one sub-Dataset per site
+})
+spec.n_runs   # 6 = 3 members × 2 sites
+```
+
+Pass `along=` to choose which dims are ensemble axes. The other dims stay
+inside each run's value, which is then a `DataArray` (or, with
+`dataset_as_field`, a `Dataset`) slice instead of a plain number. See
+[Building Fields from xarray](https://arob5.github.io/PyEns/user_guide/xarray.html)
+for the exact conversion rules, including how date labels are handled.
+
+---
+
 ## Core concepts
 
 | Concept | Description |
@@ -133,6 +177,7 @@ Full documentation is at **https://arob5.github.io/PyEns/**.
 | Page | Description |
 |---|---|
 | [Data Model](https://arob5.github.io/PyEns/user_guide/data_model.html) | Axes, fields, specs — zip vs Cartesian product |
+| [Building Fields from xarray](https://arob5.github.io/PyEns/user_guide/xarray.html) | `pyens.xarray`: dims to axes, variables to fields |
 | [Running an Ensemble](https://arob5.github.io/PyEns/user_guide/running.html) | Backends, `EnsembleRunner`, structured results |
 | [Running on a Grid Engine Cluster](https://arob5.github.io/PyEns/user_guide/gridengine.html) | `GridEngineBackend`: array jobs via `qsub`, failure handling |
 | [Reproducibility and Serialization](https://arob5.github.io/PyEns/user_guide/reproducibility.html) | Saving specs, custom codecs, production workflow |
