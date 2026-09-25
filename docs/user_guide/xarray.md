@@ -50,7 +50,8 @@ axes_of(table)
 ```
 
 A coordinate with duplicate labels is refused, because each position along an
-axis needs its own label.
+axis needs its own label. A dim of length 0 is refused, because an axis needs
+at least one position.
 
 ### How labels are converted
 
@@ -64,7 +65,7 @@ Dates and times are the one exception. They become **ISO 8601 strings**:
 |---|---|
 | `datetime64` (any resolution), `pandas.Timestamp`, `datetime.datetime`, `cftime` datetimes | `"2020-01-01T00:00:00"` |
 | … with nonzero fractional seconds | `"2020-01-01T06:30:00.500000"` |
-| … with a time zone | `"2020-01-01T00:00:00+00:00"` |
+| … with a time zone (kept, not converted to UTC) | `"2020-01-01T00:00:00-05:00"` |
 | `datetime.date` | `"2020-01-01"` |
 | `timedelta64`, `datetime.timedelta` | `"P0DT6H0M0S"` (six hours) |
 
@@ -76,8 +77,11 @@ Strings are used for three reasons:
   resolutions would otherwise give unequal axes.
 - **They survive serialization.** `spec.dump()` writes axis labels as JSON,
   which has no date type.
-- **xarray accepts them.** `dataset.sel(time="2020-01-01T06:00:00")` works, so
-  a run's coordinate selects its own time.
+- **xarray accepts them.** On a `datetime64`, `cftime`, or `timedelta64`
+  coordinate, `dataset.sel(time="2020-01-01T06:00:00")` works, so a run's
+  coordinate selects its own time. A coordinate of `datetime.date` objects is
+  a plain object coordinate to xarray, so `.sel` needs the object back:
+  `dataset.sel(day=datetime.date.fromisoformat(label))`.
 
 ---
 
@@ -233,6 +237,10 @@ The rules:
 - The `Axis` may have a different name from the dim. Its name is the key used
   in run coordinates.
 - Entries for dims the object does not have are ignored.
+- Each dim needs its own axis. Passing one `Axis` for two dims (say, `origin`
+  and `destination`) is refused: PyEns would treat them as one dimension, and
+  a field along both would run only its diagonal. The same holds for two
+  different `Axis` objects with the same name.
 
 ---
 
@@ -249,8 +257,9 @@ bit, such as latitudes computed in two ways, give unequal axes, and
 compare equal. Avoid NaN labels, since NaN is not equal to itself.
 
 **Slices share memory with your data.** `DataArray` and `Dataset` values are
-views into the original arrays, not copies. Under `SequentialBackend`, a model
-that modifies its input in place modifies your data.
+views into the original arrays, not copies, even when `axes=` reorders them.
+Under `SequentialBackend`, a model that modifies the value it receives in
+place modifies your data.
 
 **Sending slices to workers.** `LocalBackend` and `GridEngineBackend` pickle
 each run's inputs. A slice pickles only its own data, plus the coordinates it

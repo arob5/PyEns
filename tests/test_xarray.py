@@ -8,6 +8,8 @@ import importlib
 import pickle
 import subprocess
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -37,7 +39,7 @@ SITES = ["harvard_forest", "niwot_ridge", "bartlett"]
 MEMBERS = [10, 20]
 
 
-def _identity(**inputs):
+def _identity(**inputs: Any) -> dict[str, Any]:
     return inputs
 
 
@@ -76,23 +78,23 @@ def _forcing() -> xr.Dataset:
 
 
 class TestAxesOf:
-    def test_one_axis_per_dim(self):
+    def test_one_axis_per_dim(self) -> None:
         axes = axes_of(_table())
         assert axes == {
             "member": Axis("member", labels=MEMBERS),
             "site": Axis("site", labels=SITES),
         }
 
-    def test_labels_are_plain_python_values(self):
+    def test_labels_are_plain_python_values(self) -> None:
         axes = axes_of(_table())
         assert all(type(label) is int for label in axes["member"].labels)
         assert all(type(label) is str for label in axes["site"].labels)
 
-    def test_dataarray(self):
+    def test_dataarray(self) -> None:
         axes = axes_of(_table()["leaf_area"])
         assert list(axes) == ["member", "site"]
 
-    def test_dim_without_coordinate_is_positional(self):
+    def test_dim_without_coordinate_is_positional(self) -> None:
         array = xr.DataArray(np.zeros((3, 2)), dims=("member", "site"),
                              coords={"site": ["a", "b"]})
         axes = axes_of(array)
@@ -100,7 +102,7 @@ class TestAxesOf:
         assert axes["member"].labels == (0, 1, 2)
         assert axes["member"] != Axis("member", labels=[0, 1, 2])
 
-    def test_same_labels_from_another_caller_give_equal_axes(self):
+    def test_same_labels_from_another_caller_give_equal_axes(self) -> None:
         other = xr.Dataset(
             {"lai_obs": (("site", "member"), np.zeros((3, 2)))},
             coords={"site": np.array(SITES, dtype=object), "member": np.array(MEMBERS)},
@@ -108,7 +110,7 @@ class TestAxesOf:
         assert axes_of(other)["site"] == axes_of(_table())["site"]
         assert axes_of(other)["member"] == axes_of(_table())["member"]
 
-    def test_duplicate_labels_refused(self):
+    def test_duplicate_labels_refused(self) -> None:
         dataset = xr.Dataset({"x": ("site", [1, 2])}, coords={"site": ["a", "a"]})
         with pytest.raises(ValueError, match=r"dim 'site'.*duplicate labels \['a'\]"):
             axes_of(dataset)
@@ -120,7 +122,7 @@ class TestAxesOf:
 
 
 class TestFieldsFromDataset:
-    def test_shared_dim_zips_other_dim_crosses(self):
+    def test_shared_dim_zips_other_dim_crosses(self) -> None:
         dataset = _table()
         fields = fields_from_dataset(dataset)
         spec = EnsembleSpec(inputs=fields)
@@ -137,14 +139,14 @@ class TestFieldsFromDataset:
             seen.append(tuple(sorted(coord.items())))
         assert len(set(seen)) == spec.n_runs
 
-    def test_values_are_plain_python_values(self):
+    def test_values_are_plain_python_values(self) -> None:
         fields = fields_from_dataset(_table())
         value = fields["leaf_area"].value_at(
             {ax: 0 for ax in fields["leaf_area"].axes}
         )
         assert type(value) is float
 
-    def test_axes_follow_each_variables_dim_order(self):
+    def test_axes_follow_each_variables_dim_order(self) -> None:
         dataset = _table()
         dataset["transposed"] = dataset["leaf_area"].transpose("site", "member")
         fields = fields_from_dataset(dataset)
@@ -154,7 +156,7 @@ class TestFieldsFromDataset:
         for inputs, _ in spec.iter_runs():
             assert inputs["transposed"] == inputs["leaf_area"]
 
-    def test_hand_built_label_keyed_grid_zips(self):
+    def test_hand_built_label_keyed_grid_zips(self) -> None:
         sites = Axis("site", labels=SITES)
         climate = Grid({"bartlett": "c3", "harvard_forest": "c1", "niwot_ridge": "c2"},
                        along=sites)
@@ -165,7 +167,7 @@ class TestFieldsFromDataset:
         for inputs, coord in spec.iter_runs():
             assert inputs["climate"] == by_site[coord["site"]]
 
-    def test_two_datasets_over_the_same_labels_zip(self):
+    def test_two_datasets_over_the_same_labels_zip(self) -> None:
         observed = xr.Dataset(
             {"lai_obs": ("site", [9.0, 8.0, 7.0])},
             coords={"site": SITES},
@@ -178,7 +180,7 @@ class TestFieldsFromDataset:
         for inputs, coord in spec.iter_runs():
             assert inputs["lai_obs"] == observed["lai_obs"].sel(site=coord["site"]).item()
 
-    def test_positional_dim(self):
+    def test_positional_dim(self) -> None:
         dataset = _table().drop_vars("member")
         fields = fields_from_dataset(dataset)
         assert fields["leaf_area"].axes[0] == Axis("member", size=2)
@@ -188,7 +190,7 @@ class TestFieldsFromDataset:
             expected = dataset["leaf_area"].isel(member=coord["member"]).sel(site=coord["site"])
             assert inputs["leaf_area"] == expected.item()
 
-    def test_zero_dim_variable_is_fixed(self):
+    def test_zero_dim_variable_is_fixed(self) -> None:
         dataset = _table()
         dataset["timestep"] = ((), 3600)
         fields = fields_from_dataset(dataset)
@@ -197,7 +199,7 @@ class TestFieldsFromDataset:
         assert type(fields["timestep"].value_at({})) is int
         assert EnsembleSpec(inputs=fields).n_runs == 6
 
-    def test_duplicate_labels_refused_naming_the_variable(self):
+    def test_duplicate_labels_refused_naming_the_variable(self) -> None:
         dataset = xr.Dataset(
             {"soil_depth": ("site", [0.5, 0.8])},
             coords={"site": ["a", "a"]},
@@ -205,7 +207,7 @@ class TestFieldsFromDataset:
         with pytest.raises(ValueError, match=r"variable 'soil_depth'.*dim 'site'.*unique"):
             fields_from_dataset(dataset)
 
-    def test_no_casting_and_nan_kept(self):
+    def test_no_casting_and_nan_kept(self) -> None:
         dataset = xr.Dataset(
             {
                 "count": ("site", np.array([1, 2], dtype=np.int32)),
@@ -221,7 +223,7 @@ class TestFieldsFromDataset:
         assert np.isnan(fields["flux"].value_at({sites: 0}))
         assert fields["name"].value_at({sites: 1}) == "y"
 
-    def test_plain_value_spec_survives_dump_and_load(self, tmp_path):
+    def test_plain_value_spec_survives_dump_and_load(self, tmp_path: Path) -> None:
         dataset = _forcing()[["co2"]].assign(offset=("site", [1.0, 2.0, 3.0]))
         spec = EnsembleSpec(inputs=fields_from_dataset(dataset))
         path = tmp_path / "spec.json"
@@ -236,7 +238,7 @@ class TestFieldsFromDataset:
 
 
 class TestAlong:
-    def test_slices_keep_the_other_dims(self):
+    def test_slices_keep_the_other_dims(self) -> None:
         forcing = _forcing()
         grid = field_from_dataarray(forcing["tair"], along="site")
         assert grid.axes == (Axis("site", labels=SITES),)
@@ -250,7 +252,7 @@ class TestAlong:
             xr.testing.assert_identical(value, forcing["tair"].sel(site=coord["site"]))
             assert value["site"].item() == coord["site"]
 
-    def test_along_order_sets_axis_order(self):
+    def test_along_order_sets_axis_order(self) -> None:
         array = _table()["leaf_area"].expand_dims(layer=2).transpose("member", "layer", "site")
         grid = field_from_dataarray(array, along=["site", "member"])
         assert [a.name for a in grid.axes] == ["site", "member"]
@@ -259,7 +261,7 @@ class TestAlong:
             assert inputs["x"].dims == ("layer",)
             xr.testing.assert_identical(inputs["x"], array.sel(coord))
 
-    def test_along_every_dim_gives_plain_values(self):
+    def test_along_every_dim_gives_plain_values(self) -> None:
         array = _table()["leaf_area"]
         grid = field_from_dataarray(array, along=["site", "member"])
         assert [a.name for a in grid.axes] == ["site", "member"]
@@ -267,7 +269,7 @@ class TestAlong:
         for inputs, coord in spec.iter_runs():
             assert inputs["x"] == array.sel(coord).item()
 
-    def test_dataset_variable_without_along_dims_is_fixed(self):
+    def test_dataset_variable_without_along_dims_is_fixed(self) -> None:
         forcing = _forcing()
         fields = fields_from_dataset(forcing, along="site")
         assert isinstance(fields["co2"], Fixed)
@@ -282,20 +284,20 @@ class TestAlong:
             (["plot"], r"dim\(s\) \['plot'\]"),
         ],
     )
-    def test_bad_along_refused(self, along, message):
+    def test_bad_along_refused(self, along: list[str], message: str) -> None:
         with pytest.raises(ValueError, match=message):
             field_from_dataarray(_forcing()["tair"], along=along)
         with pytest.raises(ValueError, match=message):
             fields_from_dataset(_forcing(), along=along)
 
-    def test_slice_pickles_only_its_own_data(self):
+    def test_slice_pickles_only_its_own_data(self) -> None:
         array = xr.DataArray(np.random.default_rng(0).random((50, 2000)),
                              dims=("site", "time"))
         grid = field_from_dataarray(array, along="site")
         cell = grid.value_at({grid.axes[0]: 7})
         assert len(pickle.dumps(cell)) < len(pickle.dumps(array)) / 20
 
-    def test_slices_run_in_worker_processes(self):
+    def test_slices_run_in_worker_processes(self) -> None:
         forcing = _forcing()
         spec = EnsembleSpec(inputs={
             "series": field_from_dataarray(forcing["tair"], along="site"),
@@ -317,7 +319,7 @@ class TestAlong:
 
 
 class TestDatasetAsField:
-    def test_each_run_gets_a_sub_dataset(self):
+    def test_each_run_gets_a_sub_dataset(self) -> None:
         forcing = _forcing()
         climate = dataset_as_field(forcing, along="site")
         assert climate.axes == (Axis("site", labels=SITES),)
@@ -328,7 +330,7 @@ class TestDatasetAsField:
             assert set(value.data_vars) == {"tair", "precip", "co2"}
             xr.testing.assert_identical(value, forcing.sel(site=coord["site"]))
 
-    def test_zips_with_fields_from_another_dataset(self):
+    def test_zips_with_fields_from_another_dataset(self) -> None:
         spec = EnsembleSpec(inputs={
             **fields_from_dataset(_table()),
             "climate": dataset_as_field(_forcing(), along="site"),
@@ -337,7 +339,7 @@ class TestDatasetAsField:
         for inputs, coord in spec.iter_runs():
             assert inputs["climate"]["site"].item() == coord["site"]
 
-    def test_along_required(self):
+    def test_along_required(self) -> None:
         with pytest.raises(TypeError):
             dataset_as_field(_forcing())  # type: ignore[call-arg]
         with pytest.raises(ValueError, match="at least one dim"):
@@ -350,7 +352,7 @@ class TestDatasetAsField:
 
 
 class TestSuppliedAxes:
-    def test_matched_by_label_and_reordered(self):
+    def test_matched_by_label_and_reordered(self) -> None:
         dataset = _table()
         sites = Axis("site", labels=list(reversed(SITES)))
         fields = fields_from_dataset(dataset, axes={"site": sites})
@@ -362,7 +364,7 @@ class TestSuppliedAxes:
             assert inputs["leaf_area"] == expected["leaf_area"].item()
             assert inputs["soil_depth"] == expected["soil_depth"].item()
 
-    def test_reorders_slices_and_sub_datasets(self):
+    def test_reorders_slices_and_sub_datasets(self) -> None:
         forcing = _forcing()
         sites = Axis("site", labels=["bartlett", "harvard_forest", "niwot_ridge"])
         for field in (
@@ -372,33 +374,33 @@ class TestSuppliedAxes:
             for i, label in enumerate(sites.labels):
                 assert field.value_at({sites: i})["site"].item() == label
 
-    def test_axis_name_is_the_coordinate_key(self):
+    def test_axis_name_is_the_coordinate_key(self) -> None:
         stations = Axis("station", labels=SITES)
         spec = EnsembleSpec(inputs=fields_from_dataset(_table(), axes={"site": stations}))
         _, coord = next(spec.iter_runs())
         assert set(coord) == {"member", "station"}
 
-    def test_wrong_size_refused(self):
+    def test_wrong_size_refused(self) -> None:
         with pytest.raises(ValueError, match=r"variable 'leaf_area'.*size 2.*size 3"):
             fields_from_dataset(_table(), axes={"site": Axis("site", labels=["a", "b"])})
 
-    def test_wrong_labels_refused(self):
+    def test_wrong_labels_refused(self) -> None:
         sites = Axis("site", labels=["harvard_forest", "niwot_ridge", "howland"])
         with pytest.raises(ValueError, match=r"\['howland'\] that the dim does not"):
             fields_from_dataset(_table(), axes={"site": sites})
 
-    def test_positional_dim_accepts_a_size_axis(self):
+    def test_positional_dim_accepts_a_size_axis(self) -> None:
         dataset = _table().drop_vars("member")
         members = Axis("member", size=2)
         fields = fields_from_dataset(dataset, axes={"member": members})
         assert fields["leaf_area"].axes[0] is members
 
-    def test_positional_dim_refuses_string_labels(self):
+    def test_positional_dim_refuses_string_labels(self) -> None:
         dataset = _table().drop_vars("member")
         with pytest.raises(ValueError, match=r"no coordinate.*Axis\('member', size=2\)"):
             fields_from_dataset(dataset, axes={"member": Axis("member", labels=["a", "b"])})
 
-    def test_unused_entries_ignored(self):
+    def test_unused_entries_ignored(self) -> None:
         fields = fields_from_dataset(_table(), axes={"plot": Axis("plot", size=4)})
         assert EnsembleSpec(inputs=fields).n_runs == 6
 
@@ -410,17 +412,17 @@ class TestSuppliedAxes:
 
 class TestTimeLabels:
     @pytest.mark.parametrize("unit", ["ns", "us", "s"])
-    def test_datetime_labels_are_iso_strings(self, unit):
+    def test_datetime_labels_are_iso_strings(self, unit: str) -> None:
         time = np.array(["2020-01-01T00:00", "2020-01-01T06:30"], dtype=f"datetime64[{unit}]")
         array = xr.DataArray([1.0, 2.0], dims="time", coords={"time": time})
         assert axes_of(array)["time"].labels == ("2020-01-01T00:00:00", "2020-01-01T06:30:00")
 
-    def test_fractional_seconds(self):
+    def test_fractional_seconds(self) -> None:
         time = pd.to_datetime(["2020-01-01T00:00:00.5"])
         array = xr.DataArray([1.0], dims="time", coords={"time": time})
         assert axes_of(array)["time"].labels == ("2020-01-01T00:00:00.500000",)
 
-    def test_datetime_round_trips_through_run_record(self, tmp_path):
+    def test_datetime_round_trips_through_run_record(self, tmp_path: Path) -> None:
         dataset = xr.Dataset(
             {"tair": ("time", [280.0, 281.0, 282.0])},
             coords={"time": pd.date_range("2020-01-01", periods=3, freq="6h")},
@@ -437,7 +439,7 @@ class TestTimeLabels:
         spec.dump(path)
         assert EnsembleSpec.load(path).axes == spec.axes
 
-    def test_cftime_labels_are_iso_strings(self):
+    def test_cftime_labels_are_iso_strings(self) -> None:
         pytest.importorskip("cftime")
         time = xr.date_range("2000-02-28", periods=2, calendar="noleap", use_cftime=True)
         array = xr.DataArray([1.0, 2.0], dims="time", coords={"time": time})
@@ -445,15 +447,92 @@ class TestTimeLabels:
         assert labels == ("2000-02-28T00:00:00", "2000-03-01T00:00:00")
         assert array.sel(time=labels[1]).item() == 2.0
 
-    def test_timedelta_labels_are_iso_durations(self):
+    def test_timedelta_labels_are_iso_durations(self) -> None:
         lead = pd.to_timedelta(["0h", "6h"]).values
         array = xr.DataArray([1.0, 2.0], dims="lead", coords={"lead": lead})
         assert axes_of(array)["lead"].labels == ("P0DT0H0M0S", "P0DT6H0M0S")
 
-    def test_date_objects(self):
+    def test_date_objects(self) -> None:
         dates = np.array([datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)], dtype=object)
         array = xr.DataArray([1.0, 2.0], dims="day", coords={"day": dates})
         assert axes_of(array)["day"].labels == ("2020-01-01", "2020-01-02")
+
+
+class TestTimeZonesAndDates:
+    def test_time_zone_kept_and_selects(self) -> None:
+        time = pd.date_range("2020-01-01", periods=2, freq="h", tz="America/New_York")
+        array = xr.DataArray([1.0, 2.0], dims="time", coords={"time": time})
+        labels = axes_of(array)["time"].labels
+        assert labels == ("2020-01-01T00:00:00-05:00", "2020-01-01T01:00:00-05:00")
+        assert [array.sel(time=label).item() for label in labels] == [1.0, 2.0]
+
+    def test_date_labels_select_through_fromisoformat(self) -> None:
+        dates = np.array([datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)], dtype=object)
+        array = xr.DataArray([1.0, 2.0], dims="day", coords={"day": dates})
+        spec = EnsembleSpec(inputs={"x": field_from_dataarray(array)})
+        for inputs, coord in spec.iter_runs():
+            day = datetime.date.fromisoformat(coord["day"])
+            assert inputs["x"] == array.sel(day=day).item()
+
+
+class TestSharedAxisNames:
+    def test_one_axis_for_two_dims_refused(self) -> None:
+        flows = xr.DataArray(np.arange(9.0).reshape(3, 3), dims=("origin", "destination"))
+        sites = Axis("site", size=3)
+        with pytest.raises(ValueError, match=r"dims 'origin' and 'destination'.*'site'"):
+            field_from_dataarray(flows, axes={"origin": sites, "destination": sites})
+
+    def test_across_variables_refused(self) -> None:
+        dataset = xr.Dataset({"a": ("origin", [1, 2]), "b": ("destination", [3, 4])})
+        sites = Axis("site", size=2)
+        with pytest.raises(ValueError, match="variable 'b'.*would both be the axis"):
+            fields_from_dataset(dataset, axes={"origin": sites, "destination": sites})
+
+    def test_equal_but_distinct_axes_refused(self) -> None:
+        flows = xr.DataArray(np.zeros((2, 2)), dims=("origin", "destination"))
+        with pytest.raises(ValueError, match="would both be the axis"):
+            field_from_dataarray(flows, axes={
+                "origin": Axis("site", size=2),
+                "destination": Axis("site", size=2),
+            })
+
+    def test_dataset_as_field_refused(self) -> None:
+        dataset = xr.Dataset({"flow": (("origin", "destination"), np.zeros((2, 2)))})
+        sites = Axis("site", size=2)
+        with pytest.raises(ValueError, match="would both be the axis"):
+            dataset_as_field(dataset, along=["origin", "destination"],
+                             axes={"origin": sites, "destination": sites})
+
+
+class TestEdgeCases:
+    def test_reordered_slices_stay_views(self) -> None:
+        forcing = _forcing()
+        sites = Axis("site", labels=list(reversed(SITES)))
+        climate = dataset_as_field(forcing, along="site", axes={"site": sites})
+        tair = field_from_dataarray(forcing["tair"], along="site", axes={"site": sites})
+        for i, label in enumerate(sites.labels):
+            cell = climate.value_at({sites: i})
+            assert cell["site"].item() == label
+            assert np.shares_memory(cell["tair"].values, forcing["tair"].values)
+            assert np.shares_memory(tair.value_at({sites: i}).values, forcing["tair"].values)
+
+    def test_non_string_dim_names(self) -> None:
+        array = xr.DataArray([[1, 2], [3, 4]], dims=(0, 1))
+        grid = field_from_dataarray(array)
+        assert grid.axes == (Axis("0", size=2), Axis("1", size=2))
+        assert grid.value_at({grid.axes[0]: 1, grid.axes[1]: 0}) == 3
+        sliced = field_from_dataarray(array, along=0)
+        assert sliced.value_at({sliced.axes[0]: 1}).values.tolist() == [3, 4]
+        fields = fields_from_dataset(array.to_dataset(name="x"), axes={0: Axis("row", size=2)})
+        assert [a.name for a in fields["x"].axes] == ["row", "1"]
+
+    @pytest.mark.parametrize("coords", [{"site": []}, {}])
+    def test_zero_length_dim_refused(self, coords: dict[str, Any]) -> None:
+        array = xr.DataArray(np.zeros(0), dims="site", coords=coords)
+        with pytest.raises(ValueError, match="dim 'site' has length 0"):
+            axes_of(array)
+        with pytest.raises(ValueError, match="dim 'site' has length 0"):
+            field_from_dataarray(array)
 
 
 # ---------------------------------------------------------------------------
@@ -461,20 +540,20 @@ class TestTimeLabels:
 # ---------------------------------------------------------------------------
 
 
-def test_docstring_examples_run():
+def test_docstring_examples_run() -> None:
     failures, tried = doctest.testmod(pyens_xarray, optionflags=doctest.NORMALIZE_WHITESPACE)
     assert tried > 0
     assert failures == 0
 
 
-def test_import_guard(monkeypatch):
+def test_import_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "xarray", None)
     monkeypatch.delitem(sys.modules, "pyens.xarray")
     with pytest.raises(ImportError, match=r"pip install pyens\[xarray\]"):
         importlib.import_module("pyens.xarray")
 
 
-def test_core_does_not_import_xarray():
+def test_core_does_not_import_xarray() -> None:
     code = "import sys, pyens; print('xarray' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"

@@ -37,6 +37,8 @@ All user-visible API changes are documented here.
     run is a sub-`Dataset`.
   - `axes=` uses `Axis` objects you already have, matched to dims by label,
     with the data reordered to the `Axis`'s label order.
+  - Refused: dims of length 0, and two dims of one object whose axes would
+    share a name (PyEns would treat them as one dimension).
   - New user guide page: *Building Fields from xarray*.
 
 - **`GridEngineBackend`** — runs each `map` call as one Grid Engine array job
