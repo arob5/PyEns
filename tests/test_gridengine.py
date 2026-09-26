@@ -19,11 +19,13 @@ from pyens.backends import (
 from pyens.backends import gridengine
 from pyens.backends._batch import BatchDir
 from pyens.backends.gridengine import (
+    _OWNED_OPTIONS,
     _signals_ignored,
     _signals_raise_system_exit,
     parse_qacct,
     parse_qstat_xml,
     parse_submit_output,
+    directive_options,
     parse_task_ids,
     task_ranges,
 )
@@ -93,10 +95,21 @@ class TestConfiguration:
         )
         assert backend.directives == ("-P myproject", "-l mem_free=4G", "-v OMP_NUM_THREADS")
 
-    def test_directives_must_not_be_a_single_string(self, tmp_path):
-        with pytest.raises(ValueError, match="sequences"):
-            GridEngineBackend(walltime=60, work_dir=tmp_path, n_jobs=1,
-                              directives="-P myproject")
+    @pytest.mark.parametrize("name", ["directives", "setup"])
+    @pytest.mark.parametrize("value", [
+        "-P myproject", {"-P myproject"}, frozenset({"-P myproject"}),
+        (d for d in ["-P myproject"]), ["-P myproject", 3], [None],
+    ])
+    def test_directives_and_setup_must_be_lists_of_strings(self, tmp_path, name, value):
+        with pytest.raises(TypeError, match=name):
+            GridEngineBackend(walltime=60, work_dir=tmp_path, n_jobs=1, **{name: value})
+
+    def test_directive_order_is_kept(self, tmp_path):
+        directives = ["-q b.q", "-P myproject", "-q a.q"]
+        backend = GridEngineBackend(walltime=60, work_dir=tmp_path, n_jobs=1,
+                                    directives=directives)
+        assert backend.directives == tuple(directives)
+        assert dataclasses.replace(backend).directives == tuple(directives)
 
     @pytest.mark.parametrize("name", ["1job", "a b", "a/b", ""])
     def test_invalid_job_name(self, tmp_path, name):
@@ -132,6 +145,116 @@ class TestConfiguration:
 # ---------------------------------------------------------------------------
 # Job script
 # ---------------------------------------------------------------------------
+
+
+_OWNED_ARGS = {
+    "-t": "1-10", "-tc": "5", "-o": "/x", "-e": "/x", "-j": "y", "-N": "name",
+    "-pe": "omp 4", "-wd": "/x", "-cwd": None, "-S": "/bin/sh", "-sync": "y",
+    "-terse": None, "-b": "y", "-now": "y",
+}
+
+
+def _spellings(option: str) -> list[str]:
+    arg = _OWNED_ARGS[option]
+    if arg is None:
+        return [option]
+    return [f"{option} {arg}", f"{option}{arg}"]
+
+
+def _check(tmp_path, directive: str) -> GridEngineBackend:
+    return GridEngineBackend(walltime=60, work_dir=tmp_path, n_jobs=1,
+                             directives=[directive])
+
+
+class TestDirectives:
+    def test_owned_args_cover_every_owned_option(self):
+        assert set(_OWNED_ARGS) == set(_OWNED_OPTIONS)
+
+    @pytest.mark.parametrize("spelled", [
+        s for option in _OWNED_ARGS for s in _spellings(option)
+    ])
+    @pytest.mark.parametrize("template", ["{}", "-m ea {} -M me@example.org",
+                                          "-m ea -M me@example.org {}"])
+    def test_owned_option_refused_in_any_position(self, tmp_path, spelled, template):
+        directive = template.format(spelled)
+        option = directive_options(spelled)[0][0]
+        with pytest.raises(ValueError) as info:
+            _check(tmp_path, directive)
+        message = str(info.value)
+        assert repr(directive) in message
+        assert f"sets {option}," in message
+        assert _OWNED_OPTIONS[option] in message
+
+    @pytest.mark.parametrize("directive", [
+        "-l h_rt=01:00:00", "-l s_rt=01:00:00", "-hard -l h_rt=1:00:00",
+        "-soft -l s_rt=1:00:00", "-l H_RT=1:00:00", "-l mem_free=4G,h_rt=1:00:00",
+        "-l mem_free=4G h_rt=1:00:00", "-l 'mem_free=4G, h_rt=1:00:00'",
+        "-lh_rt=1:00:00", "-m ea -l h_rt=2:00:00", "-l h_rt = 1:00:00",
+        "-q all.q -hard -l mem_free=4G,S_RT=1:00:00 -m ea",
+    ])
+    def test_run_time_limit_refused(self, tmp_path, directive):
+        with pytest.raises(ValueError, match="walltime=") as info:
+            _check(tmp_path, directive)
+        assert repr(directive) in str(info.value)
+
+    @pytest.mark.parametrize("directive", ["-clear", "-m ea -clear", "-@ opts.txt",
+                                           "-@opts.txt"])
+    def test_uncheckable_options_refused(self, tmp_path, directive):
+        with pytest.raises(ValueError) as info:
+            _check(tmp_path, directive)
+        assert repr(directive) in str(info.value)
+
+    @pytest.mark.parametrize("directive", [
+        "-m ea -M me@example.org", "-l mem_per_core=4G", "-q long.q -l mem_per_core=4G",
+        "-p -100", "-binding linear:1", "-js 10", "-jsv /x/jsv.sh", "-tcon y",
+        "-hard -l h_vmem=4G", "-notify", "-v A=1,B=2 -V", "-ac note='a b'",
+        "-hold_jid prep", "-shell y",
+    ])
+    def test_allowed_directives(self, tmp_path, directive):
+        assert _check(tmp_path, directive).directives == (directive,)
+
+    @pytest.mark.parametrize("directive", ["-m 'ea", '-N "x', "-m ea -M 'me"])
+    def test_unbalanced_quote(self, tmp_path, directive):
+        with pytest.raises(ValueError) as info:
+            _check(tmp_path, directive)
+        assert repr(directive) in str(info.value)
+        with pytest.raises(ValueError):
+            directive_options(directive)
+
+    @pytest.mark.parametrize("directive, expected", [
+        ("-P myproject", [("-P", ["myproject"])]),
+        ("-Pmyproject", [("-P", ["myproject"])]),
+        ("-t 1-10", [("-t", ["1-10"])]),
+        ("-t1-10", [("-t", ["1-10"])]),
+        ("-tc5", [("-tc", ["5"])]),
+        ("-l a=b", [("-l", ["a=b"])]),
+        ("-la=b", [("-l", ["a=b"])]),
+        ("-l a=b c=d", [("-l", ["a=b", "c=d"])]),
+        ("-pe omp 4", [("-pe", ["omp", "4"])]),
+        ("-peomp 4", [("-pe", ["omp", "4"])]),
+        ("-js10", [("-js", ["10"])]),
+        ("-jsv /x", [("-jsv", ["/x"])]),
+        ("-p -100", [("-p", ["-100"])]),
+        ("-m ea -M me@example.org", [("-m", ["ea"]), ("-M", ["me@example.org"])]),
+        ("-hard -l h_vmem=4G -soft -q a.q",
+         [("-hard", []), ("-l", ["h_vmem=4G"]), ("-soft", []), ("-q", ["a.q"])]),
+        ("-ac 'note=a b'", [("-ac", ["note=a b"])]),
+        ("-cwd", [("-cwd", [])]),
+        ("-Vx", [("-Vx", [])]),
+        ("-q -t 1-10", [("-q", []), ("-t", ["1-10"])]),
+    ])
+    def test_directive_options(self, directive, expected):
+        assert directive_options(directive) == expected
+
+    @pytest.mark.parametrize("directive", ["", "   ", "P myproject", "-P a\n-P b",
+                                           "-P a\r"])
+    def test_directive_options_rejects_malformed(self, directive):
+        with pytest.raises(ValueError):
+            directive_options(directive)
+
+    def test_directive_options_rejects_non_string(self):
+        with pytest.raises(TypeError):
+            directive_options(["-P", "x"])  # type: ignore[arg-type]
 
 
 class TestScript:
