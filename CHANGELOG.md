@@ -47,8 +47,23 @@ All user-visible API changes are documented here.
     `-pe <parallel_env> N` and runs each task's chunk in `N` processes;
     `max_concurrent` maps to `-tc`; `walltime` (required) maps to `-l h_rt`.
   - Group- and site-specific settings go in `directives` (raw `qsub` options)
-    and `setup` (shell lines run before each task). Options the backend sets
-    itself are rejected.
+    and `setup` (shell lines run before each task), each a list or tuple of
+    strings kept in order. A bare string, a set, or a non-string entry raises
+    `TypeError`.
+  - Every option in a directive is checked, not only the first, including
+    attached spellings such as `-t1-10`. Refused: options the backend sets
+    itself (`-t`, `-tc`, `-o`, `-e`, `-j`, `-N`, `-pe`, `-wd`, `-cwd`, `-S`,
+    `-sync`, `-terse`, `-b`, `-now`); a run-time limit (`h_rt` or `s_rt`
+    anywhere in a `-l` or `-masterl` list, in any case); options that would
+    discard or change the backend's options (`-clear`, `-@`, `-adds`,
+    `-mods`, `-clearp`, `-clears`); options that keep the job from being
+    submitted or starting (`-h`, `-verify`, `-help`, `-w v`, `-w p`); and
+    `#`, which `qsub` reads as the start of a comment, even inside quotes.
+    Each error names the directive and what to use instead.
+  - `pyens.backends.gridengine.directive_options(directive)` splits a
+    directive into `(option, arguments)` pairs the way the backend reads it,
+    so a site-specific helper can enforce its own policy (a fixed project, a
+    required resource) with the same parsing.
   - Results are exchanged through a batch directory on a shared filesystem.
     Tasks append each run's result as it finishes, so a task killed partway
     keeps its finished runs.

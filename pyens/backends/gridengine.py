@@ -35,11 +35,70 @@ logger = logging.getLogger(__name__)
 
 KeepPolicy = Literal["always", "on_failure", "never"]
 
-# Options the backend writes itself; a directive repeating one would conflict.
-_OWNED_OPTIONS = frozenset({
-    "-t", "-tc", "-o", "-e", "-j", "-N", "-pe", "-wd", "-cwd", "-S",
-    "-sync", "-terse", "-b", "-now",
-})
+_LOGS_HINT = "task logs always go to the batch directory"
+_WORKING_DIR_HINT = (
+    "tasks start in the driver's working directory; change it before calling map"
+)
+_TRACKING_HINT = "GridEngineBackend needs its own setting to submit and track the job"
+# Options the backend writes itself, each with what to use instead; a
+# directive repeating one would conflict.
+_OWNED_OPTIONS: dict[str, str] = {
+    "-t": "use n_jobs= or runs_per_job= instead",
+    "-tc": "use max_concurrent= instead",
+    "-N": "use job_name= instead",
+    "-pe": "use slots= and parallel_env= instead",
+    "-o": _LOGS_HINT,
+    "-e": _LOGS_HINT,
+    "-j": _LOGS_HINT,
+    "-wd": _WORKING_DIR_HINT,
+    "-cwd": _WORKING_DIR_HINT,
+    "-S": "the job script always runs with /bin/bash; put shell commands in setup=",
+    "-sync": _TRACKING_HINT,
+    "-terse": _TRACKING_HINT,
+    "-b": _TRACKING_HINT,
+    "-now": _TRACKING_HINT,
+}
+# Other options a directive may not use, each with the reason. Directives are
+# written after the backend's own lines, so -clear discards those lines.
+_REFUSED_OPTIONS: dict[str, str] = {
+    "-clear": "it would discard the options GridEngineBackend writes",
+    "-@": "options read from a file cannot be checked; list them in directives instead",
+    "-adds": "it can change options GridEngineBackend sets; use the option itself",
+    "-mods": "it can change options GridEngineBackend sets; use the option itself",
+    "-clearp": "it can discard options GridEngineBackend sets",
+    "-clears": "it can discard options GridEngineBackend sets",
+    "-h": "a held job does not start until it is released, so map would wait",
+    "-verify": "qsub would only print the job instead of submitting it",
+    "-help": "qsub would only print its help instead of submitting the job",
+}
+# -w v and -w p check the job without submitting it.
+_NO_SUBMIT_VERIFY_MODES = frozenset({"v", "p"})
+# Options whose arguments may name resources. -hard and -soft take none, so a
+# word after them is invalid qsub, but a run-time limit there is refused too.
+_RESOURCE_OPTIONS = frozenset({"-l", "-masterl", "-hard", "-soft"})
+_RUN_TIME_LIMITS = frozenset({"h_rt", "s_rt"})
+# qsub options across SGE, OGS and Univa/Altair Grid Engine, mapped to whether
+# each takes an argument. Used to split attached spellings such as "-t1-10";
+# an option missing here is kept as written.
+_QSUB_OPTIONS: dict[str, bool] = {
+    "-@": True, "-a": True, "-A": True, "-ac": True, "-adds": True,
+    "-ar": True, "-b": True, "-bgio": True, "-binding": True, "-c": True,
+    "-C": True, "-ckpt": True, "-clear": False, "-clearp": True, "-clears": True,
+    "-cwd": False, "-dc": True,
+    "-display": True, "-dl": True, "-e": True, "-h": False, "-hard": False,
+    "-help": False, "-hold_jid": True, "-hold_jid_ad": True, "-i": True,
+    "-j": True, "-jc": True, "-js": True, "-jsv": True, "-l": True, "-m": True,
+    "-M": True, "-masterl": True, "-masterq": True, "-mbind": True,
+    "-mods": True, "-N": True, "-notify": False, "-now": True, "-o": True,
+    "-p": True, "-P": True, "-pe": True, "-pty": True, "-q": True, "-r": True,
+    "-R": True, "-rdi": True, "-rou": True, "-S": True, "-sc": True,
+    "-shell": True, "-si": True, "-soft": False, "-suspend_remote": True,
+    "-sync": True, "-t": True, "-tc": True, "-tcon": True, "-terse": False,
+    "-umask": True, "-v": True, "-V": False, "-verify": False, "-w": True,
+    "-wd": True, "-xd": True, "-xd_run_as_image_user": True, "-xdv": True,
+}
+_ATTACHABLE = sorted((o for o, arg in _QSUB_OPTIONS.items() if arg), key=len, reverse=True)
+_NEGATIVE_NUMBER = re.compile(r"^-\d+$")
 _JOB_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 _WALLTIME = re.compile(r"^(\d+):([0-5]\d):([0-5]\d)$")
 _COMMAND_TIMEOUT = 120.0
@@ -126,12 +185,23 @@ class GridEngineBackend(Backend):
         parallel_env: Name of the shared-memory parallel environment used
             when ``slots > 1``, e.g. ``"omp"`` or ``"smp"``; ``qconf -spl``
             lists the names your cluster defines.
-        directives: Extra ``qsub`` options, one per string, written as
-            ``#$`` lines in the job script, e.g. ``["-P myproject",
-            "-l mem_per_core=4G"]``. Options the backend sets itself
-            (``-t``, ``-tc``, ``-o``, ``-e``, ``-j``, ``-N``, ``-pe``,
-            ``-wd``, ``-cwd``, ``-S``, ``-sync`` and ``h_rt``) are rejected.
-        setup: Shell lines run in each task before the worker starts, e.g.
+        directives: Extra ``qsub`` options as a list or tuple of strings,
+            e.g. ``["-P myproject", "-l mem_per_core=4G"]``. Each string is
+            written as one ``#$`` line in the job script, in the order
+            given, and may hold several options (``"-m ea -M
+            me@example.org"``). Every option in a string is checked, as
+            read by :func:`directive_options`. Options the backend sets
+            itself (``-t``, ``-tc``, ``-o``, ``-e``, ``-j``, ``-N``,
+            ``-pe``, ``-wd``, ``-cwd``, ``-S``, ``-sync``, ``-terse``,
+            ``-b`` and ``-now``) are rejected, and so are a run-time limit
+            (``h_rt`` or ``s_rt`` in a resource list), options that would
+            discard or change those (``-clear``, ``-@``, ``-adds``,
+            ``-mods``, ``-clearp``, ``-clears``), options that stop the job
+            from being submitted or starting (``-h``, ``-verify``,
+            ``-help``, ``-w v``, ``-w p``) and ``#``, which starts a
+            comment on a directive line.
+        setup: Shell lines as a list or tuple of strings, run in order in
+            each task before the worker starts, e.g.
             ``["source /etc/profile", "module load gcc",
             "export OMP_NUM_THREADS=1"]``. The job shell is not a login
             shell, so ``module`` often needs ``source /etc/profile`` first.
@@ -157,6 +227,8 @@ class GridEngineBackend(Backend):
 
     Raises:
         ValueError: If the configuration is invalid.
+        TypeError: If ``directives`` or ``setup`` is not a list or tuple of
+            strings.
 
     Examples:
         Split an ensemble into 50 array tasks of one slot each::
@@ -190,8 +262,8 @@ class GridEngineBackend(Backend):
     runs_per_job: int | None = None
     slots: int = 1
     parallel_env: str = "omp"
-    directives: Sequence[str] = ()
-    setup: Sequence[str] = ()
+    directives: list[str] | tuple[str, ...] = ()
+    setup: list[str] | tuple[str, ...] = ()
     max_concurrent: int | None = None
     python: str | os.PathLike[str] | None = None
     job_name: str = "pyens"
@@ -224,15 +296,10 @@ class GridEngineBackend(Backend):
                 f"job_name must start with a letter or underscore and contain only "
                 f"letters, digits, '_', '.' and '-', got {self.job_name!r}"
             )
-        if isinstance(self.directives, str) or isinstance(self.setup, str):
-            raise ValueError("directives and setup must be sequences of strings")
-        set_("directives", tuple(self.directives))
-        set_("setup", tuple(self.setup))
+        set_("directives", _string_tuple("directives", self.directives))
+        set_("setup", _string_tuple("setup", self.setup))
         for directive in self.directives:
             _check_directive(directive)
-        for line in self.setup:
-            if not isinstance(line, str):
-                raise ValueError(f"setup lines must be strings, got {line!r}")
         if self.python is not None:
             set_("python", os.fspath(self.python))
 
@@ -877,27 +944,154 @@ def _normalize_walltime(value: str | int) -> str:
     raise ValueError(f"walltime must be 'HH:MM:SS' or a number of seconds, got {value!r}")
 
 
-def _check_directive(directive: Any) -> None:
+def _string_tuple(name: str, value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raise TypeError(
+            f"{name} must be a list or tuple of strings, got the string {value!r}; "
+            f"wrap it in a list"
+        )
+    if isinstance(value, (set, frozenset)):
+        raise TypeError(
+            f"{name} must be a list or tuple of strings, got a set, which does "
+            f"not keep its order"
+        )
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(
+            f"{name} must be a list or tuple of strings, got {type(value).__name__}"
+        )
+    for item in value:
+        if not isinstance(item, str):
+            raise TypeError(f"{name} entries must be strings, got {item!r}")
+    return tuple(value)
+
+
+def directive_options(directive: str) -> list[tuple[str, list[str]]]:
+    """Split a ``qsub`` directive into its options, each with its arguments.
+
+    This is how :class:`GridEngineBackend` reads each string in its
+    ``directives``, so a site-specific helper can enforce its own policy
+    (a required project, a forbidden queue) with the same reading of the
+    string.
+
+    The string is split into words as a shell would, respecting quotes.
+    Each word starting with ``-`` begins a new option, and the words after
+    it are its arguments; a negative number such as the ``-100`` in
+    ``-p -100`` is read as an argument. An option written with its argument
+    attached, such as ``-t1-10``, ``-Pmyproject`` or ``-lmem_free=4G``, is
+    split into the option and the argument, so a check for the option
+    cannot be bypassed that way; ``qsub`` itself (OGS/GE 2011.11, for
+    example) may reject this spelling, so write a space in your own
+    directives. Options are case-sensitive and returned as written.
+
+    ``qsub`` treats ``#`` as the start of a comment anywhere on a directive
+    line, even inside quotes, and ignores the rest of the line. A directive
+    containing ``#`` is refused, so what this function returns is what
+    ``qsub`` reads.
+
+    Args:
+        directive: One ``qsub`` directive, as passed in ``directives``,
+            e.g. ``"-m ea -M me@example.org"``.
+
+    Returns:
+        ``(option, arguments)`` pairs in the order they appear.
+
+    Raises:
+        TypeError: If *directive* is not a string.
+        ValueError: If *directive* spans more than one line, contains
+            ``#``, has an unbalanced quote, or does not start with an
+            option.
+
+    Examples:
+        >>> directive_options("-m ea -M me@example.org")
+        [('-m', ['ea']), ('-M', ['me@example.org'])]
+        >>> directive_options("-Pmyproject -hard -l mem_free=4G,h_vmem=4G")
+        [('-P', ['myproject']), ('-hard', []), ('-l', ['mem_free=4G,h_vmem=4G'])]
+
+        Requiring a project in a site-specific helper::
+
+            def check_project(directives: list[str]) -> None:
+                projects = [
+                    args for d in directives
+                    for option, args in directive_options(d) if option == "-P"
+                ]
+                if projects != [["myproject"]]:
+                    raise ValueError("pass exactly one '-P myproject' directive")
+    """
+    return [(option, args) for option, args, _ in _parse_directive(directive)]
+
+
+def _parse_directive(directive: str) -> list[tuple[str, list[str], str]]:
+    """Return ``(option, arguments, word)`` triples, *word* as written."""
     if not isinstance(directive, str):
-        raise ValueError(f"directives must be strings, got {directive!r}")
+        raise TypeError(f"a directive must be a string, got {directive!r}")
     if "\n" in directive or "\r" in directive:
         raise ValueError(f"a directive must be a single line: {directive!r}")
-    tokens = directive.split()
-    if not tokens or not tokens[0].startswith("-"):
+    if "#" in directive:
+        raise ValueError(
+            f"directive {directive!r} contains '#', which qsub reads as the start "
+            f"of a comment, even inside quotes; remove it"
+        )
+    try:
+        words = shlex.split(directive)
+    except ValueError as exc:
+        raise ValueError(f"cannot split directive {directive!r}: {exc}") from None
+    if not words or not words[0].startswith("-"):
         raise ValueError(
             f"a directive must be a qsub option starting with '-', e.g. "
             f"'-P myproject', got {directive!r}"
         )
-    option = tokens[0]
-    if option in _OWNED_OPTIONS:
-        raise ValueError(
-            f"directive {directive!r} sets {option}, which GridEngineBackend "
-            f"sets itself; use its arguments instead"
-        )
-    if option in ("-l", "-hard", "-soft") and re.search(r"\b[hs]_rt\s*=", directive):
-        raise ValueError(
-            f"directive {directive!r} sets a run-time limit; use walltime= instead"
-        )
+    options: list[tuple[str, list[str], str]] = []
+    for word in words:
+        if options:
+            option, args, _ = options[-1]
+            takes_argument = _QSUB_OPTIONS.get(option, False)
+            if not word.startswith("-") or (
+                takes_argument and not args and _NEGATIVE_NUMBER.match(word)
+            ):
+                args.append(word)
+                continue
+        option, args = _split_attached(word)
+        options.append((option, args, word))
+    return options
+
+
+def _split_attached(word: str) -> tuple[str, list[str]]:
+    if word in _QSUB_OPTIONS:
+        return word, []
+    for option in _ATTACHABLE:
+        if word.startswith(option):
+            return option, [word[len(option):]]
+    return word, []
+
+
+def _check_directive(directive: str) -> None:
+    for option, args, word in _parse_directive(directive):
+        # An attached spelling, or an unknown option read as one, would
+        # otherwise produce a message naming an option the user never typed.
+        read_as = "" if word == option else f" (read from {word!r})"
+        if option in _OWNED_OPTIONS:
+            raise ValueError(
+                f"directive {directive!r} sets {option}{read_as}, which "
+                f"GridEngineBackend sets itself; {_OWNED_OPTIONS[option]}"
+            )
+        if option in _REFUSED_OPTIONS:
+            raise ValueError(
+                f"directive {directive!r} uses {option}{read_as}: "
+                f"{_REFUSED_OPTIONS[option]}"
+            )
+        if option == "-w" and args and args[0] in _NO_SUBMIT_VERIFY_MODES:
+            raise ValueError(
+                f"directive {directive!r} uses -w {args[0]}, which only checks the "
+                f"job and does not submit it; use -w e, -w w or -w n"
+            )
+        if option in _RESOURCE_OPTIONS:
+            for resource in re.split(r"[,\s]+", " ".join(args)):
+                name = resource.partition("=")[0].strip().lower()
+                if name in _RUN_TIME_LIMITS:
+                    raise ValueError(
+                        f"directive {directive!r} sets a run-time limit ({name}); "
+                        f"use walltime= instead"
+                    )
 
 
 def _reject_main_module(fn: Callable[..., Any]) -> None:

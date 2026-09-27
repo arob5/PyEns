@@ -153,17 +153,55 @@ anything is submitted.
 
 ### Directives
 
-`directives` takes raw `qsub` options, one per string, written as `#$` lines
-in the job script:
+`directives` takes raw `qsub` options as a list or tuple of strings. Each
+string is written as one `#$` line in the job script, in the order given, and
+may hold several options:
 
 ```python
-directives=["-P mygroup", "-l mem_per_core=4G", "-v OMP_NUM_THREADS"]
+directives=["-P mygroup", "-l mem_per_core=4G", "-m ea -M me@example.org"]
 ```
 
-PyEns writes some options itself and rejects directives that would conflict
-with them: `-t`, `-tc`, `-o`, `-e`, `-j`, `-N`, `-pe`, `-wd`, `-cwd`, `-S`,
-`-sync` and `h_rt`. Use `n_jobs`, `max_concurrent`, `slots`, `job_name` and
-`walltime` instead.
+PyEns checks every option in every string. It also reads an option written
+with its argument attached (`-t1-10`, `-Pmygroup`) as that option, so it
+can't slip past the checks; `qsub` on OGS/GE 2011.11 (used on BU's SCC, for
+example) rejects that spelling, so write a space between an option and its
+argument. PyEns rejects:
+
+- Options it writes itself: `-t`, `-tc`, `-o`, `-e`, `-j`, `-N`, `-pe`, `-wd`,
+  `-cwd`, `-S`, `-sync`, `-terse`, `-b` and `-now`. Use `n_jobs` or
+  `runs_per_job`, `max_concurrent`, `slots` and `parallel_env`, and
+  `job_name` instead. Task logs always go to the batch directory.
+- A run-time limit, `h_rt` or `s_rt`, anywhere in a `-l` (or `-masterl`)
+  resource list, in any case. Use `walltime` instead.
+- Options that would discard or change the options PyEns writes: `-clear`,
+  `-@` (options read from a file can't be checked), and on Univa/Altair Grid
+  Engine `-adds`, `-mods`, `-clearp` and `-clears`.
+- Options that keep the job from being submitted or from starting: `-h`
+  (hold), `-verify`, `-help`, `-w v` and `-w p`.
+- `#` anywhere in a directive. `qsub` reads it as the start of a comment,
+  even inside quotes, and ignores the rest of the line.
+
+The error message names the directive and what to use instead.
+
+#### Reading directives in your own checks
+
+`directive_options` splits a directive into its options the same way PyEns
+reads it: words are split as a shell would, respecting quotes; each word
+starting with `-` begins a new option; and an attached argument is split off.
+Each option comes back with its list of arguments, in order:
+
+```python
+from pyens.backends.gridengine import directive_options
+
+directive_options("-m ea -M me@example.org")
+# [('-m', ['ea']), ('-M', ['me@example.org'])]
+directive_options("-Pmygroup -hard -l mem_per_core=4G")
+# [('-P', ['mygroup']), ('-hard', []), ('-l', ['mem_per_core=4G'])]
+```
+
+Use it when a helper for your site needs its own rules, such as requiring one
+particular project, so that your check and PyEns agree on what each string
+sets. *Example: a helper for your cluster* below shows one.
 
 Keep group- or site-specific settings (project names, special queues,
 environment variables) in your own code, for example as a small function in
@@ -314,6 +352,21 @@ def cluster_backend(n_jobs: int, walltime: str) -> GridEngineBackend:
         setup=["source /etc/profile", "export OMP_NUM_THREADS=1"],
         max_concurrent=200,
     )
+```
+
+If the helper accepts extra directives from its callers, check them with
+`directive_options` so a caller can't switch to another project:
+
+```python
+from pyens.backends.gridengine import directive_options
+
+def check_directives(directives: list[str]) -> None:
+    for directive in directives:
+        for option, args in directive_options(directive):
+            if option == "-P":
+                raise ValueError(
+                    f"{directive!r} sets a project; cluster_backend always uses myproject"
+                )
 ```
 
 Two things to keep in mind on shared clusters:
