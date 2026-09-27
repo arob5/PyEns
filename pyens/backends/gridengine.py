@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 
 KeepPolicy = Literal["always", "on_failure", "never"]
 
+_LOGS_HINT = "task logs always go to the batch directory"
+_WORKING_DIR_HINT = (
+    "tasks start in the driver's working directory; change it before calling map"
+)
+_TRACKING_HINT = "GridEngineBackend needs its own setting to submit and track the job"
 # Options the backend writes itself, each with what to use instead; a
 # directive repeating one would conflict.
 _OWNED_OPTIONS: dict[str, str] = {
@@ -42,23 +47,35 @@ _OWNED_OPTIONS: dict[str, str] = {
     "-tc": "use max_concurrent= instead",
     "-N": "use job_name= instead",
     "-pe": "use slots= and parallel_env= instead",
-    "-o": "task logs always go to the batch directory",
-    "-e": "task logs always go to the batch directory",
-    "-j": "task logs always go to the batch directory",
-    "-wd": "tasks start in the driver's working directory; change it before calling map",
-    "-cwd": "tasks start in the driver's working directory; change it before calling map",
+    "-o": _LOGS_HINT,
+    "-e": _LOGS_HINT,
+    "-j": _LOGS_HINT,
+    "-wd": _WORKING_DIR_HINT,
+    "-cwd": _WORKING_DIR_HINT,
     "-S": "the job script always runs with /bin/bash; put shell commands in setup=",
-    "-sync": "GridEngineBackend needs its own setting to submit and track the job",
-    "-terse": "GridEngineBackend needs its own setting to submit and track the job",
-    "-b": "GridEngineBackend needs its own setting to submit and track the job",
-    "-now": "GridEngineBackend needs its own setting to submit and track the job",
+    "-sync": _TRACKING_HINT,
+    "-terse": _TRACKING_HINT,
+    "-b": _TRACKING_HINT,
+    "-now": _TRACKING_HINT,
 }
-# Options that would bypass the directive checks: directives are written
-# after the backend's own lines, so -clear would discard them.
-_UNCHECKABLE_OPTIONS: dict[str, str] = {
+# Other options a directive may not use, each with the reason. Directives are
+# written after the backend's own lines, so -clear discards those lines.
+_REFUSED_OPTIONS: dict[str, str] = {
     "-clear": "it would discard the options GridEngineBackend writes",
     "-@": "options read from a file cannot be checked; list them in directives instead",
+    "-adds": "it can change options GridEngineBackend sets; use the option itself",
+    "-mods": "it can change options GridEngineBackend sets; use the option itself",
+    "-clearp": "it can discard options GridEngineBackend sets",
+    "-clears": "it can discard options GridEngineBackend sets",
+    "-h": "a held job does not start until it is released, so map would wait",
+    "-verify": "qsub would only print the job instead of submitting it",
+    "-help": "qsub would only print its help instead of submitting the job",
 }
+# -w v and -w p check the job without submitting it.
+_NO_SUBMIT_VERIFY_MODES = frozenset({"v", "p"})
+# Options whose arguments may name resources. -hard and -soft take none, so a
+# word after them is invalid qsub, but a run-time limit there is refused too.
+_RESOURCE_OPTIONS = frozenset({"-l", "-masterl", "-hard", "-soft"})
 _RUN_TIME_LIMITS = frozenset({"h_rt", "s_rt"})
 # qsub options across SGE, OGS and Univa/Altair Grid Engine, mapped to whether
 # each takes an argument. Used to split attached spellings such as "-t1-10";
@@ -66,7 +83,8 @@ _RUN_TIME_LIMITS = frozenset({"h_rt", "s_rt"})
 _QSUB_OPTIONS: dict[str, bool] = {
     "-@": True, "-a": True, "-A": True, "-ac": True, "-adds": True,
     "-ar": True, "-b": True, "-bgio": True, "-binding": True, "-c": True,
-    "-C": True, "-ckpt": True, "-clear": False, "-cwd": False, "-dc": True,
+    "-C": True, "-ckpt": True, "-clear": False, "-clearp": True, "-clears": True,
+    "-cwd": False, "-dc": True,
     "-display": True, "-dl": True, "-e": True, "-h": False, "-hard": False,
     "-help": False, "-hold_jid": True, "-hold_jid_ad": True, "-i": True,
     "-j": True, "-jc": True, "-js": True, "-jsv": True, "-l": True, "-m": True,
@@ -175,8 +193,13 @@ class GridEngineBackend(Backend):
             read by :func:`directive_options`. Options the backend sets
             itself (``-t``, ``-tc``, ``-o``, ``-e``, ``-j``, ``-N``,
             ``-pe``, ``-wd``, ``-cwd``, ``-S``, ``-sync``, ``-terse``,
-            ``-b`` and ``-now``), a run-time limit (``h_rt`` or ``s_rt`` in
-            a ``-l`` list), ``-clear`` and ``-@`` are rejected.
+            ``-b`` and ``-now``) are rejected, and so are a run-time limit
+            (``h_rt`` or ``s_rt`` in a resource list), options that would
+            discard or change those (``-clear``, ``-@``, ``-adds``,
+            ``-mods``, ``-clearp``, ``-clears``), options that stop the job
+            from being submitted or starting (``-h``, ``-verify``,
+            ``-help``, ``-w v``, ``-w p``) and ``#``, which starts a
+            comment on a directive line.
         setup: Shell lines as a list or tuple of strings, run in order in
             each task before the worker starts, e.g.
             ``["source /etc/profile", "module load gcc",
@@ -955,8 +978,15 @@ def directive_options(directive: str) -> list[tuple[str, list[str]]]:
     it are its arguments; a negative number such as the ``-100`` in
     ``-p -100`` is read as an argument. An option written with its argument
     attached, such as ``-t1-10``, ``-Pmyproject`` or ``-lmem_free=4G``, is
-    split into the option and the argument. Options are case-sensitive and
-    returned as written.
+    split into the option and the argument, so a check for the option
+    cannot be bypassed that way; ``qsub`` itself (OGS/GE 2011.11, for
+    example) may reject this spelling, so write a space in your own
+    directives. Options are case-sensitive and returned as written.
+
+    ``qsub`` treats ``#`` as the start of a comment anywhere on a directive
+    line, even inside quotes, and ignores the rest of the line. A directive
+    containing ``#`` is refused, so what this function returns is what
+    ``qsub`` reads.
 
     Args:
         directive: One ``qsub`` directive, as passed in ``directives``,
@@ -967,8 +997,9 @@ def directive_options(directive: str) -> list[tuple[str, list[str]]]:
 
     Raises:
         TypeError: If *directive* is not a string.
-        ValueError: If *directive* spans more than one line, has an
-            unbalanced quote, or does not start with an option.
+        ValueError: If *directive* spans more than one line, contains
+            ``#``, has an unbalanced quote, or does not start with an
+            option.
 
     Examples:
         >>> directive_options("-m ea -M me@example.org")
@@ -986,10 +1017,20 @@ def directive_options(directive: str) -> list[tuple[str, list[str]]]:
                 if projects != [["myproject"]]:
                     raise ValueError("pass exactly one '-P myproject' directive")
     """
+    return [(option, args) for option, args, _ in _parse_directive(directive)]
+
+
+def _parse_directive(directive: str) -> list[tuple[str, list[str], str]]:
+    """Return ``(option, arguments, word)`` triples, *word* as written."""
     if not isinstance(directive, str):
         raise TypeError(f"a directive must be a string, got {directive!r}")
     if "\n" in directive or "\r" in directive:
         raise ValueError(f"a directive must be a single line: {directive!r}")
+    if "#" in directive:
+        raise ValueError(
+            f"directive {directive!r} contains '#', which qsub reads as the start "
+            f"of a comment, even inside quotes; remove it"
+        )
     try:
         words = shlex.split(directive)
     except ValueError as exc:
@@ -999,17 +1040,18 @@ def directive_options(directive: str) -> list[tuple[str, list[str]]]:
             f"a directive must be a qsub option starting with '-', e.g. "
             f"'-P myproject', got {directive!r}"
         )
-    options: list[tuple[str, list[str]]] = []
+    options: list[tuple[str, list[str], str]] = []
     for word in words:
         if options:
-            option, args = options[-1]
+            option, args, _ = options[-1]
             takes_argument = _QSUB_OPTIONS.get(option, False)
             if not word.startswith("-") or (
                 takes_argument and not args and _NEGATIVE_NUMBER.match(word)
             ):
                 args.append(word)
                 continue
-        options.append(_split_attached(word))
+        option, args = _split_attached(word)
+        options.append((option, args, word))
     return options
 
 
@@ -1023,17 +1065,26 @@ def _split_attached(word: str) -> tuple[str, list[str]]:
 
 
 def _check_directive(directive: str) -> None:
-    for option, args in directive_options(directive):
+    for option, args, word in _parse_directive(directive):
+        # An attached spelling, or an unknown option read as one, would
+        # otherwise produce a message naming an option the user never typed.
+        read_as = "" if word == option else f" (read from {word!r})"
         if option in _OWNED_OPTIONS:
             raise ValueError(
-                f"directive {directive!r} sets {option}, which GridEngineBackend "
-                f"sets itself; {_OWNED_OPTIONS[option]}"
+                f"directive {directive!r} sets {option}{read_as}, which "
+                f"GridEngineBackend sets itself; {_OWNED_OPTIONS[option]}"
             )
-        if option in _UNCHECKABLE_OPTIONS:
+        if option in _REFUSED_OPTIONS:
             raise ValueError(
-                f"directive {directive!r} uses {option}: {_UNCHECKABLE_OPTIONS[option]}"
+                f"directive {directive!r} uses {option}{read_as}: "
+                f"{_REFUSED_OPTIONS[option]}"
             )
-        if option == "-l":
+        if option == "-w" and args and args[0] in _NO_SUBMIT_VERIFY_MODES:
+            raise ValueError(
+                f"directive {directive!r} uses -w {args[0]}, which only checks the "
+                f"job and does not submit it; use -w e, -w w or -w n"
+            )
+        if option in _RESOURCE_OPTIONS:
             for resource in re.split(r"[,\s]+", " ".join(args)):
                 name = resource.partition("=")[0].strip().lower()
                 if name in _RUN_TIME_LIMITS:

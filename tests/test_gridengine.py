@@ -182,7 +182,7 @@ class TestDirectives:
             _check(tmp_path, directive)
         message = str(info.value)
         assert repr(directive) in message
-        assert f"sets {option}," in message
+        assert f"sets {option}" in message
         assert _OWNED_OPTIONS[option] in message
 
     @pytest.mark.parametrize("directive", [
@@ -191,24 +191,43 @@ class TestDirectives:
         "-l mem_free=4G h_rt=1:00:00", "-l 'mem_free=4G, h_rt=1:00:00'",
         "-lh_rt=1:00:00", "-m ea -l h_rt=2:00:00", "-l h_rt = 1:00:00",
         "-q all.q -hard -l mem_free=4G,S_RT=1:00:00 -m ea",
+        "-hard h_rt=1:00:00", "-soft s_rt=1:00:00", "-masterl h_rt=1:00:00",
     ])
     def test_run_time_limit_refused(self, tmp_path, directive):
         with pytest.raises(ValueError, match="walltime=") as info:
             _check(tmp_path, directive)
         assert repr(directive) in str(info.value)
 
-    @pytest.mark.parametrize("directive", ["-clear", "-m ea -clear", "-@ opts.txt",
-                                           "-@opts.txt"])
-    def test_uncheckable_options_refused(self, tmp_path, directive):
+    @pytest.mark.parametrize("directive", [
+        "-clear", "-m ea -clear", "-@ opts.txt", "-@opts.txt",
+        "-adds l_hard h_rt 10:00:00", "-mods l_hard h_vmem 4G", "-clearp l_hard",
+        "-clears l_hard h_rt", "-h", "-m ea -h", "-verify", "-help",
+        "-w v", "-w p", "-m ea -wv",
+    ])
+    def test_refused_options(self, tmp_path, directive):
         with pytest.raises(ValueError) as info:
             _check(tmp_path, directive)
         assert repr(directive) in str(info.value)
+
+    @pytest.mark.parametrize("directive", ["-N a#b", "-q a.q # -P myproject",
+                                           "-ac 'k=a # b'", "-P myproject #"])
+    def test_comment_character_refused(self, tmp_path, directive):
+        with pytest.raises(ValueError, match="comment"):
+            _check(tmp_path, directive)
+        with pytest.raises(ValueError, match="comment"):
+            directive_options(directive)
+
+    @pytest.mark.parametrize("directive, word", [("-t1-10", "-t1-10"),
+                                                 ("-m ea -exec foo", "-exec")])
+    def test_message_names_the_word_as_written(self, tmp_path, directive, word):
+        with pytest.raises(ValueError, match=f"read from '{word}'"):
+            _check(tmp_path, directive)
 
     @pytest.mark.parametrize("directive", [
         "-m ea -M me@example.org", "-l mem_per_core=4G", "-q long.q -l mem_per_core=4G",
         "-p -100", "-binding linear:1", "-js 10", "-jsv /x/jsv.sh", "-tcon y",
         "-hard -l h_vmem=4G", "-notify", "-v A=1,B=2 -V", "-ac note='a b'",
-        "-hold_jid prep", "-shell y",
+        "-hold_jid prep", "-shell y", "-w e", "-w w", "-w n", "-hard -q long.q",
     ])
     def test_allowed_directives(self, tmp_path, directive):
         assert _check(tmp_path, directive).directives == (directive,)

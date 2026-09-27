@@ -161,17 +161,25 @@ may hold several options:
 directives=["-P mygroup", "-l mem_per_core=4G", "-m ea -M me@example.org"]
 ```
 
-PyEns checks every option in every string, including options written with
-their argument attached (`-t1-10`, `-Pmygroup`). It rejects:
+PyEns checks every option in every string. It also reads an option written
+with its argument attached (`-t1-10`, `-Pmygroup`) as that option, so it
+can't slip past the checks; `qsub` on OGS/GE 2011.11 (used on BU's SCC, for
+example) rejects that spelling, so write a space between an option and its
+argument. PyEns rejects:
 
 - Options it writes itself: `-t`, `-tc`, `-o`, `-e`, `-j`, `-N`, `-pe`, `-wd`,
   `-cwd`, `-S`, `-sync`, `-terse`, `-b` and `-now`. Use `n_jobs` or
   `runs_per_job`, `max_concurrent`, `slots` and `parallel_env`, and
   `job_name` instead. Task logs always go to the batch directory.
-- A run-time limit, `h_rt` or `s_rt`, anywhere in a `-l` resource list. Use
-  `walltime` instead.
-- `-clear`, which would discard the options PyEns writes, and `-@`, which
-  reads options from a file PyEns cannot check.
+- A run-time limit, `h_rt` or `s_rt`, anywhere in a `-l` (or `-masterl`)
+  resource list, in any case. Use `walltime` instead.
+- Options that would discard or change the options PyEns writes: `-clear`,
+  `-@` (options read from a file can't be checked), and on Univa/Altair Grid
+  Engine `-adds`, `-mods`, `-clearp` and `-clears`.
+- Options that keep the job from being submitted or from starting: `-h`
+  (hold), `-verify`, `-help`, `-w v` and `-w p`.
+- `#` anywhere in a directive. `qsub` reads it as the start of a comment,
+  even inside quotes, and ignores the rest of the line.
 
 The error message names the directive and what to use instead.
 

@@ -53,9 +53,12 @@ All user-visible API changes are documented here.
   - Every option in a directive is checked, not only the first, including
     attached spellings such as `-t1-10`. Refused: options the backend sets
     itself (`-t`, `-tc`, `-o`, `-e`, `-j`, `-N`, `-pe`, `-wd`, `-cwd`, `-S`,
-    `-sync`, `-terse`, `-b`, `-now`), a run-time limit (`h_rt` or `s_rt`
-    anywhere in a `-l` list, in any case), `-clear` (it would discard the
-    backend's options) and `-@` (options read from a file cannot be checked).
+    `-sync`, `-terse`, `-b`, `-now`); a run-time limit (`h_rt` or `s_rt`
+    anywhere in a `-l` or `-masterl` list, in any case); options that would
+    discard or change the backend's options (`-clear`, `-@`, `-adds`,
+    `-mods`, `-clearp`, `-clears`); options that keep the job from being
+    submitted or starting (`-h`, `-verify`, `-help`, `-w v`, `-w p`); and
+    `#`, which `qsub` reads as the start of a comment, even inside quotes.
     Each error names the directive and what to use instead.
   - `pyens.backends.gridengine.directive_options(directive)` splits a
     directive into `(option, arguments)` pairs the way the backend reads it,
